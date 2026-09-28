@@ -192,11 +192,11 @@ private fun DestinationRow(title: String, hint: String, selected: Boolean, onCli
 @Composable
 fun SendToServerDialog(tracks: List<Track>, onDismiss: () -> Unit) {
     val actions = LocalActions.current
-    val servers = actions.graph.servers.servers.value
-    val saved = actions.graph.settings.settings.value.destination
+    val servers by actions.graph.servers.servers.collectAsStateWithLifecycle()
+    val settings by actions.graph.settings.settings.collectAsStateWithLifecycle()
     var destination by remember {
         mutableStateOf(
-            saved?.takeIf { d -> servers.any { it.id == d.serverId } }
+            settings.destination?.takeIf { d -> servers.any { it.id == d.serverId } }
                 ?: servers.firstOrNull()?.let { Destination(it.id, it.folders.firstOrNull().orEmpty()) },
         )
     }

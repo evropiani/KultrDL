@@ -53,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kultr.dl.core.model.Track
 import app.kultr.dl.core.util.Format
 import app.kultr.dl.data.db.DownloadState
@@ -169,6 +170,7 @@ fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit, extraActio
     val actions = LocalActions.current
     val flags = LocalTrackFlags.current[track.id]
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        val servers by actions.graph.servers.servers.collectAsStateWithLifecycle()
         MenuItem("Play", Icons.Rounded.PlayArrow, onDismiss) { actions.play(listOf(track)) }
         MenuItem("Play next", Icons.Rounded.SkipNext, onDismiss) { actions.playNext(listOf(track)) }
         MenuItem("Add to queue", Icons.AutoMirrored.Rounded.QueueMusic, onDismiss) { actions.enqueue(listOf(track)) }
@@ -188,7 +190,7 @@ fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit, extraActio
         MenuItem("Download", Icons.Rounded.Download, onDismiss) { actions.download(listOf(track)) }
         MenuItem("Download as…", Icons.Rounded.Tune, onDismiss) { actions.downloadAs(listOf(track)) }
         if (flags?.localUri != null) {
-            if (actions.graph.servers.servers.value.isNotEmpty()) {
+            if (servers.isNotEmpty()) {
                 MenuItem("Send to server…", Icons.Rounded.CloudUpload, onDismiss) { actions.sendToServer(listOf(track)) }
             }
             MenuItem("Remove download", Icons.Rounded.Delete, onDismiss) { actions.removeDownload(track) }
