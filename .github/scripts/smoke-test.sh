@@ -183,6 +183,12 @@ diag_windows() {
 dialog_open() { adb shell dumpsys window | grep -m1 mCurrentFocus | grep -q -v "MainActivity"; }
 # The folder dialog's field takes focus when it opens, and Done confirms it.
 add_folder() {
+  hide_keyboard
+  # Bring the folder buttons up the page, clear of the player and tab bar floating at the bottom.
+  swipe_up
+  swipe_up
+  echo "    before tapping Type a path:"
+  dump_ui && nodes | sed 's/^/      /'
   tap_scrolling tap_attr resource-id folder-type || return 1
   sleep 2
   echo "    after tapping Type a path:"
