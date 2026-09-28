@@ -45,7 +45,8 @@ class YtDlp(private val context: Context, private val scope: CoroutineScope) : M
         data class Failed(val message: String) : Status
     }
 
-    private val permits = Semaphore(3)
+    private val permits = Semaphore(PARALLEL)
+    private val updateLock = Mutex()
     private val initLock = Mutex()
     @Volatile private var initialised = false
     private val state = MutableStateFlow<Status>(Status.Starting)
@@ -161,11 +162,25 @@ class YtDlp(private val context: Context, private val scope: CoroutineScope) : M
     /** Fetch the newest yt-dlp release. Returns the version now installed. */
     suspend fun update(): String? = withContext(Dispatchers.IO) {
         ensureReady()
-        YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel._STABLE)
+        updateLock.withLock {
+            // The update rewrites yt-dlp in place: a process still reading it would fail
+            // ("bad local file header"). Take every permit, so it runs alone.
+            var held = 0
+            try {
+                repeat(PARALLEL) {
+                    permits.acquire()
+                    held++
+                }
+                YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel._STABLE)
+            } finally {
+                repeat(held) { permits.release() }
+            }
+        }
         version().also { state.value = Status.Ready(it) }
     }
 
     private companion object {
         const val TAG = "KultrDL"
+        const val PARALLEL = 3
     }
 }

@@ -45,6 +45,8 @@ for _ in $(seq 1 120); do
 done
 screenshot 1-home
 if log_has "yt-dlp runs:"; then echo "yt-dlp starts and runs"; else failures+=("yt-dlp did not start"); fi
+# The app updates yt-dlp soon after it starts; test with the version people will have.
+for _ in $(seq 1 45); do log_has "yt-dlp is now|yt-dlp update failed" && break; sleep 2; done
 
 # Share $1 to the app and wait for its Play button (or an error on screen).
 open_link() {
