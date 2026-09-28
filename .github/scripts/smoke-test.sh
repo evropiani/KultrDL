@@ -44,6 +44,7 @@ tap_attr() {
     | grep -o 'bounds="[^"]*"' | grep -o '[0-9]\+' | tr '\n' ' ')
   set -- $nums
   [ $# -ge 4 ] || return 1
+  echo "      tap $(( ($1 + $3) / 2 )),$(( ($2 + $4) / 2 )) on [$1,$2][$3,$4]"
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
 SIZE=$(adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1)
@@ -148,9 +149,20 @@ step() {
   "$@" && return 0
   echo "    FAILED: $what. Windows:"
   diag_windows
-  echo "    On screen (ids, texts, descriptions):"
-  dump_ui && grep -o 'resource-id="[^"]*"\|text="[^"]*"\|content-desc="[^"]*"' "$OUT/ui.xml" | grep -v '=""' | head -60 | sed 's/^/      /'
+  echo "    On screen ($SIZE):"
+  dump_ui && nodes | head -70 | sed 's/^/      /'
   return 1
+}
+# Every node that has a text, id or description, with its bounds and whether it is clickable or focused.
+nodes() {
+  python3 - "$OUT/ui.xml" <<'PY'
+import sys, xml.etree.ElementTree as ET
+for n in ET.parse(sys.argv[1]).iter("node"):
+    label = " ".join(f'{k}={n.get(k)!r}' for k in ("resource-id", "text", "content-desc") if n.get(k))
+    if label:
+        flags = "".join(c for c, k in (("C", "clickable"), ("F", "focused"), ("E", "enabled")) if n.get(k) == "true")
+        print(n.get("bounds"), flags, n.get("class", "").split(".")[-1], label)
+PY
 }
 # Tap the last text field on screen (in a dialog, its own field).
 tap_last_field() {
