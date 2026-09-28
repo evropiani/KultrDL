@@ -56,8 +56,9 @@ no_soft_keyboard() {
   for ime in $(adb shell ime list -s | tr -d '\r'); do adb shell ime disable "$ime" >/dev/null; done
   echo "  on-screen keyboards left: $(adb shell ime list -s | tr -d '\r' | tr '\n' ' ')"
 }
-# Scroll the page down, well above where the keyboard would be.
-swipe_up() { hide_keyboard; adb shell input swipe $((W / 2)) $((H * 55 / 100)) $((W / 2)) $((H * 20 / 100)) 400; sleep 1; }
+# Scroll the page down.
+# (On this small screen the page's own buttons, the mini player and the tab bar take the bottom half.)
+swipe_up() { adb shell input swipe $((W / 2)) $((H * 45 / 100)) $((W / 2)) $((H * 15 / 100)) 500; sleep 1; }
 # Run a tap command, scrolling the page down until it finds its target.
 tap_scrolling() { for _ in 1 2 3 4 5 6; do "$@" && return 0; swipe_up; done; return 1; }
 type_into() { tap_scrolling tap_attr resource-id "$1" || return 1; sleep 1; adb shell input text "$2"; sleep 1; hide_keyboard; }
