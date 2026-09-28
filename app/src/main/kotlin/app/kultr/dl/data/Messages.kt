@@ -32,7 +32,13 @@ fun describe(error: Throwable): String {
         error is java.net.UnknownHostException -> "No connection."
         error is java.net.SocketTimeoutException -> "The server took too long to answer."
         message.isNullOrEmpty() -> error::class.java.simpleName
-        message.startsWith("ERROR: ") -> message.removePrefix("ERROR: ").take(220)
+        message.startsWith("ERROR: ") -> message.removePrefix("ERROR: ")
+            // "[youtube] abc123: Sign in to confirm … Use --cookies …" → the part meant for people.
+            .replace(Regex("^\\[[^\\]]+] [^:]+: "), "")
+            .substringBefore(" Use --")
+            .substringBefore(" See  http")
+            .trim()
+            .take(220)
         else -> message.take(220)
     }
 }
