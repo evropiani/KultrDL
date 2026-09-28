@@ -1,6 +1,8 @@
 package app.kultr.dl.engine
 
 import android.content.Context
+import app.kultr.dl.core.links.LinkTarget
+import app.kultr.dl.core.links.Links
 import app.kultr.dl.core.links.YtDlpJson
 import app.kultr.dl.core.model.LinkResult
 import app.kultr.dl.core.model.MediaExtractor
@@ -100,7 +102,10 @@ class YtDlp(private val context: Context, private val scope: CoroutineScope) : M
     }
 
     override suspend fun extract(url: String): LinkResult? {
-        val out = run(listOf("-J", "--flat-playlist", "--playlist-end", "500", url)).out
+        // A video opened from inside a playlist or mix is just that video.
+        val single = Links.classify(url).kind == LinkTarget.Kind.TRACK
+        val mode = if (single) listOf("--no-playlist") else listOf("--flat-playlist", "--playlist-end", "500")
+        val out = run(listOf("-J") + mode + url).out
         return YtDlpJson.parse(out)
     }
 
