@@ -52,7 +52,7 @@ W=${SIZE%x*}; H=${SIZE#*x}
 hide_keyboard() {
   if adb shell dumpsys input_method | grep -q -E "mInputShown=true|mIsInputViewShown=true|isInputViewShown=true"; then
     adb shell input keyevent 4
-    sleep 1
+    sleep 2
   fi
 }
 # Scroll the page down, well above where the keyboard would be.
@@ -140,35 +140,60 @@ fi
 # Servers: an SFTP server (OpenSSH in Docker) and an FTP server (pyftpdlib) run on this
 # machine, which the emulator reaches as 10.0.2.2. Both are added through the app's own
 # screens; a downloaded track is sent to the SFTP one, and a new download goes straight to FTP.
+# Run one step of a flow; when it fails, say which and print what the screen holds.
+step() {
+  local what=$1
+  shift
+  echo "  - $what"
+  "$@" && return 0
+  echo "    FAILED: $what. On screen (ids, texts, descriptions):"
+  dump_ui && grep -o 'resource-id="[^"]*"\|text="[^"]*"\|content-desc="[^"]*"' "$OUT/ui.xml" | grep -v '=""' | head -60 | sed 's/^/      /'
+  return 1
+}
+# Tap the last text field on screen (in a dialog, its own field).
+tap_last_field() {
+  dump_ui || return 1
+  local nums
+  nums=$(grep -o 'class="android.widget.EditText"[^>]*bounds="\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]"' "$OUT/ui.xml" | tail -1 \
+    | grep -o 'bounds="[^"]*"' | grep -o '[0-9]\+' | tr '\n' ' ')
+  set -- $nums
+  [ $# -ge 4 ] || return 1
+  adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+}
+open_folder_dialog() {
+  for _ in 1 2 3; do
+    tap_scrolling tap_attr resource-id folder-type || return 1
+    wait_screen "Add a folder" 4 && return 0
+  done
+  return 1
+}
 add_server() { # name, protocol, port, folder
-  go_tab "Settings" || return 1
-  tap_scrolling tap_text "Servers" || return 1
+  step "open Settings" go_tab "Settings" || return 1
+  step "open Servers" tap_scrolling tap_text "Servers" || return 1
   sleep 2
-  tap_text "Add server" || return 1
+  step "tap Add server" tap_text "Add server" || return 1
   sleep 2
-  type_into server-name "$1" || return 1
-  if [ "$2" != "SFTP" ]; then tap_text "$2" || return 1; fi
-  type_into server-host "10.0.2.2" || return 1
-  type_into server-port "$3" || return 1
-  type_into server-user "kultr" || return 1
-  type_into server-password "kultr-pass" || return 1
-  tap_scrolling tap_attr resource-id folder-type || return 1
-  sleep 2
-  tap_attr resource-id text-dialog-field || return 1
+  step "type the name" type_into server-name "$1" || return 1
+  if [ "$2" != "SFTP" ]; then step "choose $2" tap_text "$2" || return 1; fi
+  step "type the host" type_into server-host "10.0.2.2" || return 1
+  step "type the port" type_into server-port "$3" || return 1
+  step "type the username" type_into server-user "kultr" || return 1
+  step "type the password" type_into server-password "kultr-pass" || return 1
+  step "open Type a path" open_folder_dialog || return 1
+  step "tap the path field" eval 'tap_attr resource-id text-dialog-field || tap_last_field' || return 1
   sleep 1
   adb shell input text "$4"
   sleep 1
-  tap_text "Add" || return 1
+  step "tap Add" tap_text "Add" || return 1
   hide_keyboard
-  sleep 1
-  tap_scrolling tap_attr resource-id server-test || return 1
-  if ! wait_screen "Signed in to|Couldn.t connect|Trust" 30; then echo "No test result"; return 1; fi
+  step "tap Test connection" tap_scrolling tap_attr resource-id server-test || return 1
+  step "wait for the test result" wait_screen "Signed in to|Couldn.t connect|Trust" 30 || return 1
   screenshot "server-$1"
   screen_text | head -30
-  screen_text | grep -q "Signed in to" || return 1
-  tap_text "OK" || return 1
+  step "see Signed in" eval 'screen_text | grep -q "Signed in to"' || return 1
+  step "tap OK" tap_text "OK" || return 1
   sleep 1
-  tap_attr resource-id server-save
+  step "tap Save" tap_attr resource-id server-save
 }
 
 if [ -n "$played_from" ]; then
