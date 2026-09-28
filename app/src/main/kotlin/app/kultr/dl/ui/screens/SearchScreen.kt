@@ -1,5 +1,6 @@
 package app.kultr.dl.ui.screens
 
+import android.util.Log
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -109,6 +110,7 @@ fun SearchScreen(query: String) {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.w("KultrDL", if (isLink) "Couldn't open $trimmed" else "Search on ${source.label} failed", e)
             error = describe(e)
             results = SearchResults()
             link = null
