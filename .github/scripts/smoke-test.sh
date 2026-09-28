@@ -48,10 +48,18 @@ tap_attr() {
 }
 SIZE=$(adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1)
 W=${SIZE%x*}; H=${SIZE#*x}
-swipe_up() { adb shell input swipe $((W / 2)) $((H * 7 / 10)) $((W / 2)) $((H * 3 / 10)) 300; sleep 1; }
+# Close the on-screen keyboard if it is up (Back would leave the page if it isn't).
+hide_keyboard() {
+  if adb shell dumpsys input_method | grep -q -E "mInputShown=true|mIsInputViewShown=true|isInputViewShown=true"; then
+    adb shell input keyevent 4
+    sleep 1
+  fi
+}
+# Scroll the page down, well above where the keyboard would be.
+swipe_up() { hide_keyboard; adb shell input swipe $((W / 2)) $((H * 55 / 100)) $((W / 2)) $((H * 20 / 100)) 400; sleep 1; }
 # Run a tap command, scrolling the page down until it finds its target.
 tap_scrolling() { for _ in 1 2 3 4 5 6; do "$@" && return 0; swipe_up; done; return 1; }
-type_into() { tap_scrolling tap_attr resource-id "$1" || return 1; sleep 1; adb shell input text "$2"; sleep 1; }
+type_into() { tap_scrolling tap_attr resource-id "$1" || return 1; sleep 1; adb shell input text "$2"; sleep 1; hide_keyboard; }
 # Open a tab of the floating bar. While a search is open the bar shows a back button
 # instead of the tabs, so go back (and bring the app forward again) until they show.
 go_tab() {
@@ -149,7 +157,9 @@ add_server() { # name, protocol, port, folder
   tap_attr resource-id text-dialog-field || return 1
   sleep 1
   adb shell input text "$4"
+  sleep 1
   tap_text "Add" || return 1
+  hide_keyboard
   sleep 1
   tap_scrolling tap_attr resource-id server-test || return 1
   if ! wait_screen "Signed in to|Couldn.t connect|Trust" 30; then echo "No test result"; return 1; fi
