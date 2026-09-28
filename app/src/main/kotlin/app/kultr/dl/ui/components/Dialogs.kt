@@ -25,7 +25,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +37,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -265,6 +271,9 @@ fun TextDialog(
     placeholder: String = "",
 ) {
     var text by rememberSaveable { mutableStateOf(initial) }
+    val focus = remember { FocusRequester() }
+    // Ready to type straight away; Done on the keyboard confirms.
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = Kultr.colors.elevated,
@@ -276,8 +285,10 @@ fun TextDialog(
                 singleLine = true,
                 placeholder = { Text(placeholder) },
                 shape = MaterialTheme.shapes.medium,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (text.isNotBlank()) onConfirm(text.trim()) }),
                 // A dialog is its own window; its test tags need their own switch.
-                modifier = Modifier.fillMaxWidth().semantics { testTagsAsResourceId = true }.testTag("text-dialog-field"),
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { testTagsAsResourceId = true }.testTag("text-dialog-field"),
             )
         },
         confirmButton = { TextButton(onClick = { onConfirm(text.trim()) }, enabled = text.isNotBlank()) { Text(confirm) } },

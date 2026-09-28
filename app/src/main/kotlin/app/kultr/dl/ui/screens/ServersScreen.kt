@@ -1,6 +1,7 @@
 package app.kultr.dl.ui.screens
 
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -280,11 +281,14 @@ fun ServerEditorScreen(id: String) {
                     }
                     if (draft.protocol == Protocol.FTP) append("\nPlain FTP isn't encrypted. Use SFTP or FTPS if the server has them.")
                 }.trim()
+                Log.i("KultrDL", "Server test: signed in to ${connection.protocol.label} ${connection.host}:${connection.port}, folders ${outcome.folders}")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: UntrustedServerException) {
+                Log.i("KultrDL", "Server test: ${e.reason} ${e.fingerprint}")
                 untrusted = e
             } catch (e: Exception) {
+                Log.w("KultrDL", "Server test: couldn't connect to ${connection.protocol.label} ${connection.host}:${connection.port}", e)
                 report = "Couldn't connect: ${describe(e)}"
             } finally {
                 testing = false

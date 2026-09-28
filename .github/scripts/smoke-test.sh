@@ -146,7 +146,9 @@ step() {
   shift
   echo "  - $what"
   "$@" && return 0
-  echo "    FAILED: $what. On screen (ids, texts, descriptions):"
+  echo "    FAILED: $what. Windows:"
+  diag_windows
+  echo "    On screen (ids, texts, descriptions):"
   dump_ui && grep -o 'resource-id="[^"]*"\|text="[^"]*"\|content-desc="[^"]*"' "$OUT/ui.xml" | grep -v '=""' | head -60 | sed 's/^/      /'
   return 1
 }
@@ -160,12 +162,25 @@ tap_last_field() {
   [ $# -ge 4 ] || return 1
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
-open_folder_dialog() {
-  for _ in 1 2 3; do
-    tap_scrolling tap_attr resource-id folder-type || return 1
-    wait_screen "Add a folder" 4 && return 0
-  done
-  return 1
+# Which window has focus, and whether uiautomator can see dialog windows (for diagnosis).
+diag_windows() {
+  adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedWindow" | head -3 | sed 's/^/      /'
+  adb shell uiautomator dump --windows /sdcard/uiw.xml 2>&1 | head -2 | sed 's/^/      dump --windows: /'
+  adb shell cat /sdcard/uiw.xml 2>/dev/null | grep -o 'text="[^"]*"' | head -12 | sed 's/^/      /'
+}
+dialog_open() { adb shell dumpsys window | grep -m1 mCurrentFocus | grep -q -v "MainActivity"; }
+# The folder dialog's field takes focus when it opens, and Done confirms it.
+add_folder() {
+  tap_scrolling tap_attr resource-id folder-type || return 1
+  sleep 2
+  echo "    after tapping Type a path:"
+  diag_windows
+  adb shell input text "$1"
+  sleep 1
+  adb shell input keyevent 66
+  sleep 2
+  hide_keyboard
+  wait_screen "^$1\$" 3
 }
 add_server() { # name, protocol, port, folder
   step "open Settings" go_tab "Settings" || return 1
@@ -179,19 +194,15 @@ add_server() { # name, protocol, port, folder
   step "type the port" type_into server-port "$3" || return 1
   step "type the username" type_into server-user "kultr" || return 1
   step "type the password" type_into server-password "kultr-pass" || return 1
-  step "open Type a path" open_folder_dialog || return 1
-  step "tap the path field" eval 'tap_attr resource-id text-dialog-field || tap_last_field' || return 1
-  sleep 1
-  adb shell input text "$4"
-  sleep 1
-  step "tap Add" tap_text "Add" || return 1
-  hide_keyboard
+  step "add the folder $4" add_folder "$4" || return 1
   step "tap Test connection" tap_scrolling tap_attr resource-id server-test || return 1
-  step "wait for the test result" wait_screen "Signed in to|Couldn.t connect|Trust" 30 || return 1
+  for _ in $(seq 1 30); do log_has "Server test: .*10.0.2.2:$3|Server test: (CERT|KEY)" && break; sleep 2; done
+  grep "Server test:" "$OUT/logcat.txt" | tail -3
   screenshot "server-$1"
-  screen_text | head -30
-  step "see Signed in" eval 'screen_text | grep -q "Signed in to"' || return 1
-  step "tap OK" tap_text "OK" || return 1
+  step "sign in" log_has "Server test: signed in to $2 10.0.2.2:$3" || return 1
+  echo "    after the test:"
+  diag_windows
+  step "close the result" eval 'tap_text "OK" || { dialog_open && adb shell input keyevent 4; }' || return 1
   sleep 1
   step "tap Save" tap_attr resource-id server-save
 }
