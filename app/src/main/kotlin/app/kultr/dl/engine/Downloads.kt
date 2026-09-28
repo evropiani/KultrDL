@@ -19,8 +19,15 @@ import app.kultr.dl.KultrDLApp
 import app.kultr.dl.MainActivity
 import app.kultr.dl.R
 import app.kultr.dl.core.model.Track
+import app.kultr.dl.core.remote.Remote
+import app.kultr.dl.core.remote.RemotePath
+import app.kultr.dl.core.remote.UntrustedServerException
+import app.kultr.dl.core.util.LenientJson
 import app.kultr.dl.core.util.Text
+import app.kultr.dl.data.Destination
 import app.kultr.dl.data.Library
+import app.kultr.dl.data.SavedServer
+import app.kultr.dl.data.ServerRepository
 import app.kultr.dl.data.SettingsRepository
 import app.kultr.dl.data.db.DownloadDao
 import app.kultr.dl.data.db.DownloadEntity
@@ -28,8 +35,11 @@ import app.kultr.dl.data.db.DownloadState
 import app.kultr.dl.data.db.DownloadWithTrack
 import app.kultr.dl.data.describe
 import com.yausername.youtubedl_android.YoutubeDLException
+import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,13 +59,16 @@ data class DownloadProgress(val trackId: String, val fraction: Float, val stage:
  * The download queue: rows in the database, worked through one at a time
  * by [DownloadWorker]. Each download fetches the best audio with yt-dlp,
  * converts it with ffmpeg to the chosen format and quality, writes the
- * track's tags and cover, and saves it to Music/KultrDL.
+ * track's tags and cover, and saves it to Music/KultrDL — or sends it to a
+ * folder on an FTP or SFTP server. Tracks already on the phone can be sent
+ * to a server through the same queue.
  */
 class Downloads(
     private val context: Context,
     private val dao: DownloadDao,
     private val library: Library,
     private val settings: SettingsRepository,
+    private val servers: ServerRepository,
     private val resolver: StreamResolver,
     private val ytDlp: YtDlp,
     private val saver: MediaSaver,
@@ -68,10 +81,18 @@ class Downloads(
     private val live = MutableStateFlow<DownloadProgress?>(null)
     val progress: StateFlow<DownloadProgress?> = live
 
-    suspend fun enqueue(tracks: List<Track>, preset: DownloadPreset = settings.settings.value.download) {
+    /** Server connections in use, by track, so a cancel can cut them. */
+    private val sessions = ConcurrentHashMap<String, Closeable>()
+
+    suspend fun enqueue(
+        tracks: List<Track>,
+        preset: DownloadPreset = settings.settings.value.download,
+        destination: Destination? = settings.settings.value.destination,
+    ) {
         if (tracks.isEmpty()) return
         library.remember(tracks)
         val now = System.currentTimeMillis()
+        val target = destination?.takeIf { servers.get(it.serverId) != null }?.let(::encode)
         for (t in tracks.distinctBy { it.id }) {
             val existing = dao.get(t.id)
             if (existing != null && existing.downloadState in setOf(DownloadState.QUEUED, DownloadState.RUNNING)) continue
@@ -83,10 +104,38 @@ class Downloads(
                     quality = preset.format.normalise(preset.quality).name,
                     createdAt = now,
                     updatedAt = now,
+                    destination = target,
                 ),
             )
         }
         start()
+    }
+
+    /** Sends tracks that are already on the phone to a server folder. Returns how many were queued. */
+    suspend fun send(tracks: List<Track>, destination: Destination): Int {
+        val now = System.currentTimeMillis()
+        val preset = settings.settings.value.download
+        var queued = 0
+        for (t in tracks.distinctBy { it.id }) {
+            if (library.entity(t.id)?.localUri == null) continue
+            val existing = dao.get(t.id)
+            if (existing != null && existing.downloadState in setOf(DownloadState.QUEUED, DownloadState.RUNNING)) continue
+            dao.upsert(
+                DownloadEntity(
+                    trackId = t.id,
+                    state = DownloadState.QUEUED.name,
+                    format = preset.format.name,
+                    quality = preset.quality.name,
+                    createdAt = now,
+                    updatedAt = now,
+                    destination = encode(destination.copy(keepOnPhone = true)),
+                    upload = true,
+                ),
+            )
+            queued++
+        }
+        if (queued > 0) start()
+        return queued
     }
 
     /** Make sure a worker is running the queue. */
@@ -101,6 +150,11 @@ class Downloads(
     fun cancel(trackId: String) = scope.launch {
         dao.setState(trackId, DownloadState.CANCELLED.name, 0f, null)
         ytDlp.cancel(processId(trackId))
+        disconnect(trackId)
+    }
+
+    private fun disconnect(trackId: String) {
+        sessions.remove(trackId)?.let { runCatching { it.close() } }
     }
 
     fun retry(trackId: String) = scope.launch {
@@ -115,6 +169,7 @@ class Downloads(
 
     fun remove(trackId: String) = scope.launch {
         ytDlp.cancel(processId(trackId))
+        disconnect(trackId)
         dao.delete(trackId)
     }
 
@@ -147,11 +202,12 @@ class Downloads(
             worker.notify(title, 0f, done)
             val finished = done
             try {
-                process(row) { fraction, stage ->
+                val note = process(row) { fraction, stage ->
                     live.value = DownloadProgress(row.trackId, fraction, stage)
                     scope.launch { worker.notify(title, fraction, finished) }
                 }
-                dao.setState(row.trackId, DownloadState.DONE.name, 1f, null)
+                if (dao.get(row.trackId)?.downloadState == DownloadState.CANCELLED) continue
+                dao.setState(row.trackId, DownloadState.DONE.name, 1f, note)
                 done++
             } catch (e: CancellationException) {
                 val current = dao.get(row.trackId)
@@ -162,7 +218,8 @@ class Downloads(
                 Log.w("KultrDL", "Download of ${row.trackId} failed", e)
                 val current = dao.get(row.trackId)
                 if (current?.downloadState != DownloadState.CANCELLED && current != null) {
-                    dao.setState(row.trackId, DownloadState.FAILED.name, 0f, describe(e))
+                    val reason = if (e is UntrustedServerException) "${e.message} Check the server in Settings → Servers." else describe(e)
+                    dao.setState(row.trackId, DownloadState.FAILED.name, 0f, reason)
                 }
             } finally {
                 live.update { if (it?.trackId == row.trackId) null else it }
@@ -170,8 +227,12 @@ class Downloads(
         }
     }
 
-    private suspend fun process(row: DownloadEntity, onProgress: (Float, String) -> Unit) = withContext(Dispatchers.IO) {
+    /** Runs one job; for a server, returns where the file went. */
+    private suspend fun process(row: DownloadEntity, onProgress: (Float, String) -> Unit): String? = withContext(Dispatchers.IO) {
         val track = library.track(row.trackId) ?: throw IOException("The track is no longer in the library.")
+        val destination = row.destination?.let { runCatching { LenientJson.decodeFromString(Destination.serializer(), it) }.getOrNull() }
+        val server = destination?.let { servers.get(it.serverId) ?: throw IOException("The server it was going to has been removed.") }
+        if (row.upload && destination != null && server != null) return@withContext sendFromPhone(track, destination, server, onProgress)
         val preset = DownloadPreset(
             runCatching { AudioFormat.valueOf(row.format) }.getOrDefault(AudioFormat.MP3),
             runCatching { Quality.valueOf(row.quality) }.getOrDefault(Quality.K320),
@@ -225,19 +286,81 @@ class Downloads(
             val cover = if (options.embedArtwork) track.artworkUrl?.let { fetchCover(it) } else null
             runCatching { Tagger.tag(file, track, cover) }
 
-            onProgress(0.97f, "Saving…")
             val ext = file.extension.lowercase()
-            val name = Text.fileName("${track.artist} - ${track.title}") + "." + ext
-            val previous = library.entity(track.id)?.localUri
-            val saved = saver.save(file, name, AudioFormat.mimeFor(ext), options.saveToMusic, track.title, track.artist, track.album)
-            if (previous != null && previous != saved.uri.toString()) saver.delete(previous)
-            library.setLocal(track.id, saved.uri.toString(), preset.label, saved.size)
-            Log.i("KultrDL", "Downloaded ${track.id} as ${preset.label}: ${saved.uri} (${saved.size} bytes)")
+            val name = fileName(track, ext)
+            val sent = if (destination != null && server != null) {
+                send(track, destination, server, name, file.length(), { file.inputStream() }, onProgress, from = 0.94f, to = 0.99f)
+            } else {
+                null
+            }
+            if (sent == null || destination?.keepOnPhone == true) {
+                onProgress(0.99f, "Saving…")
+                val previous = library.entity(track.id)?.localUri
+                val saved = saver.save(file, name, AudioFormat.mimeFor(ext), options.saveToMusic, track.title, track.artist, track.album)
+                if (previous != null && previous != saved.uri.toString()) saver.delete(previous)
+                library.setLocal(track.id, saved.uri.toString(), preset.label, saved.size)
+                Log.i("KultrDL", "Downloaded ${track.id} as ${preset.label}: ${saved.uri} (${saved.size} bytes)")
+            }
             dao.setProgress(row.trackId, 1f, null)
+            sent
         } finally {
             dir.deleteRecursively()
         }
     }
+
+    /** A track that is on the phone already, sent as it is. */
+    private suspend fun sendFromPhone(track: Track, destination: Destination, server: SavedServer, onProgress: (Float, String) -> Unit): String {
+        val uri = library.entity(track.id)?.localUri
+            ?: throw IOException("“${track.title}” isn't on this phone any more.")
+        val file = saver.describe(uri) ?: throw IOException("“${track.title}” isn't on this phone any more.")
+        val name = fileName(track, file.name.substringAfterLast('.', "").lowercase().ifEmpty { "mp3" })
+        return send(track, destination, server, name, file.size, { saver.open(uri) }, onProgress, from = 0f, to = 0.99f)
+    }
+
+    /**
+     * Uploads to [destination]: into its folder, under Artist or Artist/Album
+     * when the server is set up that way. Trusts an SFTP server's key the
+     * first time it is seen, and saves it.
+     */
+    private fun send(
+        track: Track,
+        destination: Destination,
+        server: SavedServer,
+        name: String,
+        size: Long,
+        input: () -> InputStream,
+        onProgress: (Float, String) -> Unit,
+        from: Float,
+        to: Float,
+    ): String {
+        onProgress(from, "Connecting to ${server.name}…")
+        val session = Remote.open(servers.connection(server))
+        sessions[track.id] = session
+        try {
+            session.newPin?.let { servers.setPin(server.id, it) }
+            val folder = RemotePath.resolve(session.home, destination.folder)
+            val dir = RemotePath.join(folder, *server.layout.folders(track.artist, track.albumArtist, track.album).toTypedArray())
+            session.makeDirectories(dir)
+            val path = RemotePath.join(dir, name)
+            val stage = "Sending to ${server.name}…"
+            onProgress(from, stage)
+            input().use { stream ->
+                session.upload(stream, path) { sent ->
+                    val fraction = if (size > 0) (sent.toFloat() / size).coerceIn(0f, 1f) else 0f
+                    onProgress(from + (to - from) * fraction, stage)
+                }
+            }
+            Log.i("KultrDL", "Sent ${track.id} to ${server.protocol.label} ${server.host}: $path")
+            return "${server.name}: $path"
+        } finally {
+            sessions.remove(track.id)
+            session.close()
+        }
+    }
+
+    private fun fileName(track: Track, ext: String) = Text.fileName("${track.artist} - ${track.title}") + "." + ext
+
+    private fun encode(destination: Destination) = LenientJson.encodeToString(Destination.serializer(), destination)
 
     private fun fetchCover(url: String): ByteArray? = runCatching {
         http.newCall(Request.Builder().url(url).build()).execute().use { r ->

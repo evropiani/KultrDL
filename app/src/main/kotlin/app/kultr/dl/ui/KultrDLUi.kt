@@ -44,7 +44,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onSizeChanged
@@ -68,6 +71,7 @@ import app.kultr.dl.data.db.DownloadState
 import app.kultr.dl.ui.components.AddToPlaylistDialog
 import app.kultr.dl.ui.components.ArtworkBackdropPlain
 import app.kultr.dl.ui.components.DownloadAsDialog
+import app.kultr.dl.ui.components.SendToServerDialog
 import app.kultr.dl.ui.components.LocalGlassBackdrop
 import app.kultr.dl.ui.components.glassSource
 import app.kultr.dl.ui.components.rememberGlassBackdrop
@@ -82,6 +86,8 @@ import app.kultr.dl.ui.screens.LibraryScreen
 import app.kultr.dl.ui.screens.LibraryTab
 import app.kultr.dl.ui.screens.PlaylistScreen
 import app.kultr.dl.ui.screens.SearchScreen
+import app.kultr.dl.ui.screens.ServerEditorScreen
+import app.kultr.dl.ui.screens.ServersScreen
 import app.kultr.dl.ui.screens.SettingsScreen
 import app.kultr.dl.ui.theme.DEFAULT_ACCENT
 import app.kultr.dl.ui.theme.Kultr
@@ -135,6 +141,7 @@ private suspend fun sampleArtwork(context: Context, url: String): Int? = runCatc
     ArtworkColor.dominant(pixels)
 }.getOrNull()
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun KultrDLUi(requests: UiRequests) {
     val graph = KultrDLApp.graph
@@ -228,7 +235,8 @@ fun KultrDLUi(requests: UiRequests) {
         LocalTrackFlags provides flags,
         LocalDownloadBadges provides badges,
     ) {
-        Box(Modifier.fillMaxSize()) {
+        // Test tags become resource ids, so the emulator smoke test can find fields.
+        Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
             Box(Modifier.fillMaxSize().glassSource(glass)) {
                 if (settings.backdropArtwork && player.current != null) ArtworkBackdrop(player.current?.artworkUrl) else ArtworkBackdropPlain()
                 NavHost(
@@ -251,6 +259,8 @@ fun KultrDLUi(requests: UiRequests) {
                     composable(Routes.SEARCH) { SearchScreen(searchQuery) }
                     composable(Routes.DOWNLOADS) { DownloadsScreen() }
                     composable(Routes.SETTINGS) { SettingsScreen() }
+                    composable(Routes.SERVERS) { ServersScreen() }
+                    composable(Routes.SERVER) { ServerEditorScreen(it.arguments?.getString("id").orEmpty()) }
                     composable(Routes.COLLECTION) { CollectionScreen(it.arguments?.getString("id").orEmpty()) }
                     composable(
                         Routes.PLAYLIST,
@@ -320,5 +330,6 @@ fun KultrDLUi(requests: UiRequests) {
 
         dialogs.addToPlaylist?.let { tracks -> AddToPlaylistDialog(tracks, onDismiss = { dialogs.addToPlaylist = null }) }
         dialogs.downloadAs?.let { tracks -> DownloadAsDialog(tracks, onDismiss = { dialogs.downloadAs = null }) }
+        dialogs.sendTo?.let { tracks -> SendToServerDialog(tracks, onDismiss = { dialogs.sendTo = null }) }
     }
 }

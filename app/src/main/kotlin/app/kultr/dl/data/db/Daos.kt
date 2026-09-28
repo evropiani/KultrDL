@@ -121,7 +121,7 @@ interface DownloadDao {
     @Query(
         """
         SELECT d.trackId, d.state, d.format, d.quality, d.progress, d.message, d.updatedAt,
-               t.title, t.artist, t.artworkUrl, t.localUri
+               t.title, t.artist, t.artworkUrl, t.localUri, d.destination, d.upload
         FROM downloads d JOIN tracks t ON t.id = d.trackId
         ORDER BY CASE d.state WHEN 'RUNNING' THEN 0 WHEN 'QUEUED' THEN 1 WHEN 'FAILED' THEN 2 ELSE 3 END, d.updatedAt DESC
         """,

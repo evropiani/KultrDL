@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * The library and settings as one JSON file: favourites, saved tracks,
- * listening history and playlists. Downloaded files stay where they are
+ * listening history, playlists and saved servers (without their secrets). Downloaded files stay where they are
  * (Music/KultrDL); they are not part of the backup.
  */
 @Serializable
@@ -17,6 +17,8 @@ data class BackupFile(
     val settings: Settings? = null,
     val tracks: List<BackupTrack> = emptyList(),
     val playlists: List<BackupPlaylist> = emptyList(),
+    /** Saved servers, without passwords or keys. */
+    val servers: List<SavedServer> = emptyList(),
 ) {
     fun encode(): String = LenientJson.encodeToString(serializer(), this)
 

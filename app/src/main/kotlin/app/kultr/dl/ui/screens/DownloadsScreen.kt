@@ -25,10 +25,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Tune
@@ -51,6 +55,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.kultr.dl.core.util.LenientJson
+import app.kultr.dl.data.Destination
+import app.kultr.dl.data.ServerRepository
 import app.kultr.dl.data.db.DownloadState
 import app.kultr.dl.data.db.DownloadWithTrack
 import app.kultr.dl.data.db.TrackEntity
@@ -76,10 +83,14 @@ fun DownloadsScreen() {
     val live by graph.downloads.progress.collectAsStateWithLifecycle()
     val done by graph.library.downloaded.collectAsStateWithLifecycle(emptyList())
     val settings by graph.settings.settings.collectAsStateWithLifecycle()
+    val servers by graph.servers.servers.collectAsStateWithLifecycle()
     var picking by rememberSaveable { mutableStateOf(false) }
+    var choosingDestination by rememberSaveable { mutableStateOf(false) }
 
     val active = rows.filter { it.state == DownloadState.RUNNING.name || it.state == DownloadState.QUEUED.name }
     val failed = rows.filter { it.state == DownloadState.FAILED.name }
+    val sent = rows.filter { it.state == DownloadState.DONE.name && it.destination != null && it.message != null }
+    val destination = settings.destination?.takeIf { d -> servers.any { it.id == d.serverId } }
 
     LazyColumn(Modifier.fillMaxSize().statusBarsPadding(), contentPadding = PaddingValues(bottom = chromePadding())) {
         item(key = "head") {
@@ -88,6 +99,13 @@ fun DownloadsScreen() {
                 Spacer(Modifier.height(10.dp))
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Pill(settings.download.label, icon = Icons.Rounded.Tune, onClick = { picking = true })
+                    if (servers.isNotEmpty()) {
+                        Pill(
+                            destination?.let { graph.servers.label(it) } ?: "This phone",
+                            icon = if (destination == null) Icons.Rounded.PhoneAndroid else Icons.Rounded.Dns,
+                            onClick = { choosingDestination = true },
+                        )
+                    }
                     if (failed.isNotEmpty()) Pill("Retry failed", icon = Icons.Rounded.Refresh, onClick = { graph.downloads.retryFailed() })
                     if (rows.any { it.state == DownloadState.DONE.name || it.state == DownloadState.CANCELLED.name }) {
                         Pill("Clear finished", icon = Icons.Rounded.Close, onClick = { graph.downloads.clearFinished() })
@@ -95,7 +113,12 @@ fun DownloadsScreen() {
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    if (settings.saveToMusic) "Saved to Music/KultrDL, where other music apps find them." else "Saved in KultrDL's own folder.",
+                    when {
+                        destination != null && destination.keepOnPhone -> "Sent to ${graph.servers.label(destination)}, with a copy on this phone."
+                        destination != null -> "Sent to ${graph.servers.label(destination)}."
+                        settings.saveToMusic -> "Saved to Music/KultrDL, where other music apps find them."
+                        else -> "Saved in KultrDL's own folder."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = Kultr.colors.ink3,
                 )
@@ -113,20 +136,28 @@ fun DownloadsScreen() {
             item(key = "failed-head") { SectionHeader("Failed", icon = Icons.Rounded.ErrorOutline) }
             items(failed, key = { "f:" + it.trackId }) { row -> QueueRow(row, 0f, row.message) }
         }
+        if (sent.isNotEmpty()) {
+            item(key = "sent-head") { SectionHeader("Sent to servers", icon = Icons.Rounded.CloudDone) }
+            items(sent, key = { "s:" + it.trackId }) { row -> SentRow(row) }
+        }
         if (done.isNotEmpty()) {
             item(key = "done-head") {
                 SectionHeader("On this phone", icon = Icons.Rounded.DownloadDone, action = {
+                    if (servers.isNotEmpty()) TextButton(onClick = { actions.sendToServer(done.map(TrackEntity::toTrack)) }) { Text("Send all…") }
                     TextButton(onClick = { actions.play(done.map(TrackEntity::toTrack)) }) { Text("Play all") }
                 })
             }
-            items(done, key = { "d:" + it.id }) { entity -> DoneRow(entity, onPlay = { actions.play(done.map(TrackEntity::toTrack), done.indexOf(entity)) }) }
+            items(done, key = { "d:" + it.id }) { entity ->
+                DoneRow(entity, canSend = servers.isNotEmpty(), onPlay = { actions.play(done.map(TrackEntity::toTrack), done.indexOf(entity)) })
+            }
         }
-        if (active.isEmpty() && failed.isEmpty() && done.isEmpty()) {
+        if (active.isEmpty() && failed.isEmpty() && done.isEmpty() && sent.isEmpty()) {
             item(key = "empty") {
                 EmptyState(
                     Icons.Rounded.Download,
                     "Nothing downloaded yet",
-                    body = "Find a track, album or playlist and tap Download. Choose FLAC, MP3, AAC, Opus, ALAC, WAV or Ogg Vorbis above.",
+                    body = "Find a track, album or playlist and tap Download. Choose FLAC, MP3, AAC, Opus, ALAC, WAV or Ogg Vorbis above, " +
+                        "and add an FTP or SFTP server in Settings to send music straight to it.",
                 )
             }
         }
@@ -148,6 +179,29 @@ fun DownloadsScreen() {
             dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
         )
     }
+    if (choosingDestination) {
+        DestinationDialog(settings.destination, onSave = { d -> graph.settings.update { it.copy(destination = d) } }, onDismiss = { choosingDestination = false })
+    }
+}
+
+private fun destinationOf(row: DownloadWithTrack): Destination? =
+    row.destination?.let { runCatching { LenientJson.decodeFromString(Destination.serializer(), it) }.getOrNull() }
+
+private fun serverName(servers: ServerRepository, row: DownloadWithTrack): String? =
+    destinationOf(row)?.let { d -> servers.get(d.serverId)?.name ?: "a removed server" }
+
+/** A track that went to a server, and where it is there. */
+@Composable
+private fun SentRow(row: DownloadWithTrack) {
+    val colors = Kultr.colors
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Artwork(row.artworkUrl, size = 48.dp)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(row.title, color = colors.ink, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(row.message.orEmpty(), color = colors.ink3, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
 }
 
 private fun presetLabel(row: DownloadWithTrack): String {
@@ -166,8 +220,13 @@ private fun QueueRow(row: DownloadWithTrack, fraction: Float, stage: String?) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             Text(row.title, color = colors.ink, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val server = serverName(graph.servers, row)
             val line = when (state) {
-                DownloadState.QUEUED -> "Waiting · ${presetLabel(row)}"
+                DownloadState.QUEUED -> when {
+                    row.upload -> "Waiting to send to $server"
+                    server != null -> "Waiting · ${presetLabel(row)} → $server"
+                    else -> "Waiting · ${presetLabel(row)}"
+                }
                 DownloadState.RUNNING -> listOfNotNull(stage, "${(fraction * 100).toInt()}%").joinToString(" · ")
                 DownloadState.FAILED -> stage ?: "Failed"
                 else -> presetLabel(row)
@@ -199,7 +258,7 @@ private fun QueueRow(row: DownloadWithTrack, fraction: Float, stage: String?) {
 }
 
 @Composable
-private fun DoneRow(entity: TrackEntity, onPlay: () -> Unit) {
+private fun DoneRow(entity: TrackEntity, canSend: Boolean, onPlay: () -> Unit) {
     val actions = LocalActions.current
     val colors = Kultr.colors
     Row(
@@ -219,7 +278,13 @@ private fun DoneRow(entity: TrackEntity, onPlay: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(onClick = onPlay) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = colors.ink2) }
+        if (canSend) {
+            IconButton(onClick = { actions.sendToServer(listOf(entity.toTrack())) }) {
+                Icon(Icons.Rounded.CloudUpload, contentDescription = "Send to server", tint = colors.ink2)
+            }
+        } else {
+            IconButton(onClick = onPlay) { Icon(Icons.Rounded.PlayArrow, contentDescription = "Play", tint = colors.ink2) }
+        }
         IconButton(onClick = { actions.removeDownload(entity.toTrack()) }) { Icon(Icons.Rounded.Delete, contentDescription = "Delete download", tint = colors.ink3) }
     }
 }

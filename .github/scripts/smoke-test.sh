@@ -36,6 +36,23 @@ tap_text() {
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
 crashed() { log_has "FATAL EXCEPTION|ANR in $PKG"; }
+# Tap the first on-screen node whose attribute $1 (content-desc, or resource-id for a Compose test tag) is exactly $2.
+tap_attr() {
+  dump_ui || return 1
+  local nums
+  nums=$(grep -o "$1=\"$2\"[^>]*bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" "$OUT/ui.xml" | head -1 \
+    | grep -o 'bounds="[^"]*"' | grep -o '[0-9]\+' | tr '\n' ' ')
+  set -- $nums
+  [ $# -ge 4 ] || return 1
+  adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+}
+SIZE=$(adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1)
+W=${SIZE%x*}; H=${SIZE#*x}
+swipe_up() { adb shell input swipe $((W / 2)) $((H * 7 / 10)) $((W / 2)) $((H * 3 / 10)) 300; sleep 1; }
+# Run a tap command, scrolling the page down until it finds its target.
+tap_scrolling() { for _ in 1 2 3 4 5 6; do "$@" && return 0; swipe_up; done; return 1; }
+type_into() { tap_scrolling tap_attr resource-id "$1" || return 1; sleep 1; adb shell input text "$2"; sleep 1; }
+wait_screen() { for _ in $(seq 1 "$2"); do screen_text | grep -q -E "$1" && return 0; sleep 2; done; return 1; }
 
 echo "== Launch"
 adb shell am start -W -n "$PKG/.MainActivity"
@@ -98,6 +115,80 @@ else
     if [ "$saved" = 1 ]; then echo "Downloaded"; else failures+=("the download did not finish"); echo "On screen:"; screen_text | head -40; fi
   else
     failures+=("no Download button"); echo "On screen:"; screen_text | head -40
+  fi
+fi
+# Servers: an SFTP server (OpenSSH in Docker) and an FTP server (pyftpdlib) run on this
+# machine, which the emulator reaches as 10.0.2.2. Both are added through the app's own
+# screens; a downloaded track is sent to the SFTP one, and a new download goes straight to FTP.
+add_server() { # name, protocol, port, folder
+  tap_attr content-desc "Settings" || return 1
+  sleep 2
+  tap_scrolling tap_text "Servers" || return 1
+  sleep 2
+  tap_text "Add server" || return 1
+  sleep 2
+  type_into server-name "$1" || return 1
+  if [ "$2" != "SFTP" ]; then tap_text "$2" || return 1; fi
+  type_into server-host "10.0.2.2" || return 1
+  type_into server-port "$3" || return 1
+  type_into server-user "kultr" || return 1
+  type_into server-password "kultr-pass" || return 1
+  tap_scrolling tap_attr resource-id folder-type || return 1
+  sleep 2
+  tap_attr resource-id text-dialog-field || return 1
+  sleep 1
+  adb shell input text "$4"
+  tap_text "Add" || return 1
+  sleep 1
+  tap_scrolling tap_attr resource-id server-test || return 1
+  if ! wait_screen "Signed in to|Couldn.t connect|Trust" 30; then echo "No test result"; return 1; fi
+  screenshot "server-$1"
+  screen_text | head -30
+  screen_text | grep -q "Signed in to" || return 1
+  tap_text "OK" || return 1
+  sleep 1
+  tap_attr resource-id server-save
+}
+
+if [ -n "$played_from" ]; then
+  echo "== SFTP server"
+  if add_server CI-SFTP SFTP 2222 music; then
+    sleep 2
+    tap_attr content-desc "Downloads"
+    sleep 3
+    if tap_scrolling tap_attr content-desc "Send to server" && sleep 2 && tap_text "Send"; then
+      for _ in $(seq 1 40); do log_has "Sent .* to SFTP 10.0.2.2" && break; log_has "Download of .* failed" && break; sleep 2; done
+      screenshot sftp-sent
+      if log_has "Sent .* to SFTP 10.0.2.2"; then echo "Sent to SFTP"; else failures+=("sending to SFTP did not finish"); screen_text | head -40; fi
+      docker exec sftp ls -lR /home/kultr/music || true
+      docker exec sftp sh -c 'ls /home/kultr/music | grep -q .' || failures+=("no file on the SFTP server")
+    else
+      failures+=("couldn't send a download to the SFTP server"); screen_text | head -40
+    fi
+  else
+    failures+=("couldn't add the SFTP server"); screenshot sftp-add-failed; screen_text | head -40
+  fi
+
+  echo "== FTP server"
+  if add_server CI-FTP FTP 2121 music; then
+    sleep 2
+    tap_attr content-desc "Settings"
+    sleep 2
+    if tap_scrolling tap_text "Save to" && sleep 2 && tap_text "CI-FTP" && tap_text "Save"; then
+      if open_link "${LINKS[1]}" && sleep 2 && { tap_text "Download" || { sleep 2; tap_text "Download"; }; }; then
+        for _ in $(seq 1 90); do log_has "Sent .* to FTP 10.0.2.2" && break; log_has "Download of .* failed" && break; sleep 3; done
+        screenshot ftp-sent
+        if log_has "Sent .* to FTP 10.0.2.2"; then echo "Downloaded to FTP"; else failures+=("the download to FTP did not finish"); screen_text | head -40; fi
+        ls -lR /tmp/ftp || true
+        find /tmp/ftp -name '*.mp3' | grep -q . || failures+=("no file on the FTP server")
+      else
+        failures+=("couldn't start a download to FTP"); screen_text | head -40
+      fi
+    else
+      failures+=("couldn't choose the FTP server for downloads"); screen_text | head -40
+    fi
+  else
+    failures+=("couldn't add the FTP server"); screenshot ftp-add-failed; screen_text | head -40
   fi
 fi
 screenshot 9-end

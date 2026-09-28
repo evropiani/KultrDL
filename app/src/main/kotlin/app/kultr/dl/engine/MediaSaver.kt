@@ -9,10 +9,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
 
 /**
  * Puts finished downloads where music players find them: Music/KultrDL
@@ -21,6 +23,8 @@ import java.io.IOException
  */
 class MediaSaver(private val context: Context) {
     data class Saved(val uri: Uri, val size: Long)
+
+    data class Info(val name: String, val size: Long)
 
     fun save(file: File, fileName: String, mime: String, shared: Boolean, title: String, artist: String, album: String?): Saved {
         val size = file.length()
@@ -80,6 +84,22 @@ class MediaSaver(private val context: Context) {
             else -> false
         }
     }.getOrDefault(false)
+
+    /** The name and size of a saved download, or null when it's gone. */
+    fun describe(uri: String): Info? = runCatching {
+        val parsed = Uri.parse(uri)
+        when (parsed.scheme) {
+            "file" -> parsed.path?.let(::File)?.takeIf { it.isFile }?.let { Info(it.name, it.length()) }
+            "content" -> context.contentResolver.query(parsed, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { c ->
+                if (!c.moveToFirst()) return@use null
+                Info(c.getString(0) ?: "track", if (c.isNull(1)) -1 else c.getLong(1))
+            }
+            else -> null
+        }
+    }.getOrNull()
+
+    fun open(uri: String): InputStream =
+        context.contentResolver.openInputStream(Uri.parse(uri)) ?: throw IOException("Couldn't open the file on the phone.")
 
     fun needsPermission(shared: Boolean): Boolean = shared && Build.VERSION.SDK_INT < 29 && !canWriteShared()
 

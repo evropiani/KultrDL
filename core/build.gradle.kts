@@ -21,13 +21,23 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     api(libs.kotlinx.serialization.json)
     api(libs.okhttp)
+    // FTP/FTPS and SFTP; Bouncy Castle gives JSch the X25519 and Ed25519 that Android's JCE lacks.
+    implementation(libs.commons.net)
+    implementation(libs.jsch)
+    implementation(libs.bouncycastle)
 
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.sshd.sftp)
+    testImplementation(libs.ftpserver.core)
+    // Lets the test SSH server use Ed25519 keys.
+    testImplementation(libs.eddsa)
 }
 
 tasks.test {
     useJUnit()
+    // The test servers write files named "Björk"; the JVM needs a UTF-8 locale for that.
+    environment("LC_ALL", "C.UTF-8")
 }

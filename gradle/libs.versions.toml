@@ -17,6 +17,12 @@ navigation = "2.10.1"
 work = "2.11.2"
 youtubedl = "0.18.1"
 jaudiotagger = "3.0.1"
+commonsNet = "3.13.0"
+jsch = "2.28.7"
+bouncycastle = "1.86"
+sshd = "2.20.0"
+ftpserver = "1.2.1"
+eddsa = "0.3.0"
 junit = "4.13.2"
 
 [libraries]
@@ -55,6 +61,12 @@ coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version
 youtubedl-library = { module = "io.github.junkfood02.youtubedl-android:library", version.ref = "youtubedl" }
 youtubedl-ffmpeg = { module = "io.github.junkfood02.youtubedl-android:ffmpeg", version.ref = "youtubedl" }
 jaudiotagger = { module = "net.jthink:jaudiotagger", version.ref = "jaudiotagger" }
+commons-net = { module = "commons-net:commons-net", version.ref = "commonsNet" }
+jsch = { module = "com.github.mwiede:jsch", version.ref = "jsch" }
+bouncycastle = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+sshd-sftp = { module = "org.apache.sshd:sshd-sftp", version.ref = "sshd" }
+ftpserver-core = { module = "org.apache.ftpserver:ftpserver-core", version.ref = "ftpserver" }
+eddsa = { module = "net.i2p.crypto:eddsa", version.ref = "eddsa" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

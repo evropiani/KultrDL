@@ -31,6 +31,8 @@ data class Settings(
     val spotifyClientSecret: String = "",
     val download: DownloadPreset = DownloadPreset(),
     val askEachTime: Boolean = false,
+    /** Where downloads go; null is this phone. */
+    val destination: Destination? = null,
     val saveToMusic: Boolean = true,
     val wifiOnly: Boolean = false,
     val embedArtwork: Boolean = true,

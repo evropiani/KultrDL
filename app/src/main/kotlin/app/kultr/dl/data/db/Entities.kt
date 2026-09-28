@@ -1,5 +1,6 @@
 package app.kultr.dl.data.db
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -108,6 +109,12 @@ data class PlaylistTrackEntity(
 
 enum class DownloadState { QUEUED, RUNNING, DONE, FAILED, CANCELLED }
 
+/**
+ * A job in the download queue. [destination] (a [app.kultr.dl.data.Destination]
+ * as JSON) sends the file to a server; [upload] means the track is already on
+ * the phone and only needs sending. When a job for a server is done,
+ * [message] says where the file went.
+ */
 @Entity(tableName = "downloads", indices = [Index("state")])
 data class DownloadEntity(
     @PrimaryKey val trackId: String,
@@ -118,6 +125,8 @@ data class DownloadEntity(
     val message: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
+    val destination: String? = null,
+    @ColumnInfo(defaultValue = "0") val upload: Boolean = false,
 ) {
     val downloadState: DownloadState get() = runCatching { DownloadState.valueOf(state) }.getOrDefault(DownloadState.FAILED)
 }
@@ -150,6 +159,8 @@ data class DownloadWithTrack(
     val artist: String,
     val artworkUrl: String?,
     val localUri: String?,
+    val destination: String?,
+    val upload: Boolean,
 )
 
 /** What the user has done with a track, for hearts and badges in lists. */

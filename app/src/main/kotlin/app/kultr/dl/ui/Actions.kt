@@ -12,6 +12,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import app.kultr.dl.AppGraph
 import app.kultr.dl.core.model.Collection
 import app.kultr.dl.core.model.Track
+import app.kultr.dl.data.Destination
 import app.kultr.dl.data.MessageKind
 import app.kultr.dl.data.db.DownloadState
 import app.kultr.dl.data.db.TrackFlags
@@ -30,8 +31,12 @@ object Routes {
     const val SETTINGS = "settings"
     const val COLLECTION = "collection/{id}"
     const val PLAYLIST = "playlist/{id}"
+    const val SERVERS = "servers"
+    const val SERVER = "server/{id}"
+    const val NEW = "new"
 
     fun library(tab: String? = null) = if (tab == null) "library" else "library?tab=$tab"
+    fun server(id: String) = "server/" + Uri.encode(id)
     fun collection(id: String) = "collection/" + Uri.encode(id)
     fun playlist(id: Long) = "playlist/$id"
 }
@@ -51,6 +56,7 @@ object CollectionCache {
 class Dialogs {
     var addToPlaylist by mutableStateOf<List<Track>?>(null)
     var downloadAs by mutableStateOf<List<Track>?>(null)
+    var sendTo by mutableStateOf<List<Track>?>(null)
 }
 
 /** What a download row in the queue looks like to a track list. */
@@ -137,14 +143,33 @@ class AppActions(
         if (tracks.isNotEmpty()) dialogs.downloadAs = tracks
     }
 
-    fun download(tracks: List<Track>, preset: DownloadPreset) {
-        if (graph.saver.needsPermission(graph.settings.settings.value.saveToMusic)) askStoragePermission()
+    fun download(tracks: List<Track>, preset: DownloadPreset, destination: Destination? = graph.settings.settings.value.destination) {
+        val server = destination?.let { graph.servers.get(it.serverId) }
+        val onPhone = destination == null || server == null || destination.keepOnPhone
+        if (onPhone && graph.saver.needsPermission(graph.settings.settings.value.saveToMusic)) askStoragePermission()
         launch {
-            graph.downloads.enqueue(tracks, preset)
-            messages.show(
-                if (tracks.size == 1) "Downloading “${tracks[0].title}” · ${preset.label}" else "Downloading ${tracks.size} tracks · ${preset.label}",
-            )
+            graph.downloads.enqueue(tracks, preset, destination)
+            val what = if (tracks.size == 1) "“${tracks[0].title}”" else "${tracks.size} tracks"
+            messages.show("Downloading $what · ${preset.label}" + (server?.let { " → ${it.name}" } ?: ""))
         }
+    }
+
+    /** Asks which server folder, then sends tracks that are on the phone there. */
+    fun sendToServer(tracks: List<Track>) {
+        if (tracks.isEmpty()) return
+        if (graph.servers.servers.value.isEmpty()) navigate(Routes.server(Routes.NEW)) else dialogs.sendTo = tracks
+    }
+
+    fun send(tracks: List<Track>, destination: Destination) = launch {
+        val count = graph.downloads.send(tracks, destination)
+        val name = graph.servers.get(destination.serverId)?.name ?: "the server"
+        messages.show(
+            when {
+                count == 0 -> "Nothing to send: download it to the phone first"
+                count == 1 && tracks.size == 1 -> "Sending “${tracks.first().title}” to $name"
+                else -> "Sending $count ${if (count == 1) "track" else "tracks"} to $name"
+            },
+        )
     }
 
     fun removeDownload(track: Track) = launch {

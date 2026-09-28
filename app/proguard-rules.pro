@@ -33,3 +33,15 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+
+# SFTP: JSch creates its ciphers, key exchanges and signatures from class names in its
+# config. Its Bouncy Castle ones (X25519, Ed25519, ML-KEM…) pull in the BC classes they use.
+-keep class com.jcraft.jsch.** { *; }
+-dontwarn com.jcraft.jsch.**
+-dontwarn org.ietf.jgss.**
+-dontwarn com.sun.jna.**
+-dontwarn org.newsclub.net.unix.**
+-dontwarn org.apache.logging.log4j.**
+# FTP/FTPS: Commons Net can pick its directory-listing parsers by class name.
+-keep class org.apache.commons.net.** { *; }
+-dontwarn org.apache.commons.net.**

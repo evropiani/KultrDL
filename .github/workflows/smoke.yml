@@ -1,7 +1,8 @@
 name: Smoke test
 
 # The release APK on an emulator: starts yt-dlp, opens a shared link, plays
-# it and downloads it. Logs and screenshots are kept as the "smoke" artifact.
+# it and downloads it, then sends music to SFTP and FTP servers on the runner.
+# Logs and screenshots are kept as the "smoke" artifact.
 on:
   push:
     branches: ['**']
@@ -27,6 +28,15 @@ jobs:
 
       - name: Build the release APK
         run: ./gradlew --console=plain :app:assembleRelease
+
+      - name: Start an SFTP and an FTP server to send music to
+        run: |
+          docker run -d --name sftp -p 2222:22 atmoz/sftp kultr:kultr-pass:::music
+          python3 -m venv /tmp/ftpenv
+          /tmp/ftpenv/bin/pip install --quiet pyftpdlib
+          nohup /tmp/ftpenv/bin/python .github/scripts/ftp-server.py > /tmp/ftp-server.log 2>&1 &
+          for _ in $(seq 1 30); do nc -z 127.0.0.1 2121 && nc -z 127.0.0.1 2222 && break; sleep 1; done
+          nc -z 127.0.0.1 2121 && nc -z 127.0.0.1 2222
 
       - name: Enable KVM
         run: |

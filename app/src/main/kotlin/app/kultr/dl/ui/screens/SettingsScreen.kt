@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -61,7 +62,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.kultr.dl.BuildConfig
 import app.kultr.dl.R
 import app.kultr.dl.core.model.Source
+import app.kultr.dl.core.util.Format
 import app.kultr.dl.data.BackupFile
+import app.kultr.dl.data.Destination
 import app.kultr.dl.data.MessageKind
 import app.kultr.dl.data.Settings
 import app.kultr.dl.data.StreamQuality
@@ -71,7 +74,9 @@ import app.kultr.dl.engine.YouTubeProfile
 import app.kultr.dl.engine.YtDlp
 import app.kultr.dl.ui.LocalActions
 import app.kultr.dl.ui.chromePadding
+import app.kultr.dl.ui.Routes
 import app.kultr.dl.ui.components.ConfirmDialog
+import app.kultr.dl.ui.components.DestinationPicker
 import app.kultr.dl.ui.components.FormatPicker
 import app.kultr.dl.ui.components.GlassPanel
 import app.kultr.dl.ui.components.Pill
@@ -141,10 +146,21 @@ private fun <T> Choice(label: String, options: List<Pair<T, String>>, selected: 
 
 @Composable
 private fun DownloadSettings(s: Settings, update: ((Settings) -> Settings) -> Unit) {
+    val actions = LocalActions.current
+    val servers by actions.graph.servers.servers.collectAsStateWithLifecycle()
+    var choosing by remember { mutableStateOf(false) }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
         FormatPicker(s.download) { preset -> update { it.copy(download = preset) } }
     }
-    Toggle("Ask every time", s.askEachTime, hint = "Choose the format and quality for each download.") { v -> update { it.copy(askEachTime = v) } }
+    SettingRow("Save to", hint = actions.graph.servers.label(s.destination), onClick = { choosing = true }) {
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = Kultr.colors.ink3)
+    }
+    SettingRow(
+        "Servers",
+        hint = if (servers.isEmpty()) "Send downloads to a NAS or computer over SFTP, FTPS or FTP." else servers.joinToString(", ") { it.name },
+        onClick = { actions.navigate(Routes.SERVERS) },
+    ) { Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = null, tint = Kultr.colors.ink3) }
+    Toggle("Ask every time", s.askEachTime, hint = "Choose the format, quality and where it goes for each download.") { v -> update { it.copy(askEachTime = v) } }
     Toggle(
         "Save to the Music folder",
         s.saveToMusic,
@@ -152,6 +168,26 @@ private fun DownloadSettings(s: Settings, update: ((Settings) -> Settings) -> Un
     ) { v -> update { it.copy(saveToMusic = v) } }
     Toggle("Embed cover art", s.embedArtwork, hint = "Put the album artwork inside each file.") { v -> update { it.copy(embedArtwork = v) } }
     Toggle("Download on Wi-Fi only", s.wifiOnly) { v -> update { it.copy(wifiOnly = v) } }
+    if (choosing) DestinationDialog(s.destination, onSave = { d -> update { it.copy(destination = d) } }, onDismiss = { choosing = false })
+}
+
+/** Where downloads go: this phone or a folder on a saved server. */
+@Composable
+fun DestinationDialog(current: Destination?, onSave: (Destination?) -> Unit, onDismiss: () -> Unit) {
+    var destination by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Kultr.colors.elevated,
+        title = { Text("Where downloads go") },
+        text = { Column(Modifier.verticalScroll(rememberScrollState())) { DestinationPicker(destination) { destination = it } } },
+        confirmButton = {
+            TextButton(onClick = {
+                onSave(destination)
+                onDismiss()
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -323,6 +359,7 @@ private fun BackupSettings(s: Settings) {
         uri ?: return@rememberLauncherForActivityResult
         actions.launch {
             val file = graph.library.snapshot(s.copy(spotifyClientSecret = ""))
+                .copy(servers = graph.servers.servers.value.map { it.withoutSecrets() })
             withContext(Dispatchers.IO) {
                 context.contentResolver.openOutputStream(uri)?.use { it.write(file.encode().toByteArray()) }
             }
@@ -336,11 +373,16 @@ private fun BackupSettings(s: Settings) {
                 ?: throw IllegalStateException("Couldn't read that file.")
             val file = BackupFile.decode(text)
             val count = graph.library.restore(file)
+            val servers = graph.servers.restore(file.servers)
             file.settings?.let { restored -> graph.settings.update { restored.copy(spotifyClientSecret = it.spotifyClientSecret) } }
-            graph.messages.show("Restored $count tracks and ${file.playlists.size} playlists", MessageKind.SUCCESS)
+            graph.messages.show(
+                "Restored $count tracks and ${file.playlists.size} playlists" +
+                    if (servers > 0) "; enter the passwords for ${Format.count(servers, "server")} again" else "",
+                MessageKind.SUCCESS,
+            )
         }
     }
-    SettingRow("Back up library", hint = "Favourites, saved tracks, playlists, history and settings, as one file.", onClick = { export.launch("KultrDL-backup.json") })
+    SettingRow("Back up library", hint = "Favourites, saved tracks, playlists, history, settings and servers (without passwords), as one file.", onClick = { export.launch("KultrDL-backup.json") })
     SettingRow("Restore a backup", hint = "Adds to what's here; nothing is removed.", onClick = { restore.launch(arrayOf("application/json", "text/plain", "*/*")) })
     SettingRow("Clear listening history", onClick = { confirmHistory = true })
     SettingRow("Clear recent searches", onClick = { actions.launch { graph.library.clearSearches() } })

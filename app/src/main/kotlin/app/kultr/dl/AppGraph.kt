@@ -5,6 +5,7 @@ import app.kultr.dl.core.Catalog
 import app.kultr.dl.core.net.Http
 import app.kultr.dl.data.Library
 import app.kultr.dl.data.Messages
+import app.kultr.dl.data.ServerRepository
 import app.kultr.dl.data.SettingsRepository
 import app.kultr.dl.data.db.KultrDLDatabase
 import app.kultr.dl.engine.Downloads
@@ -33,6 +34,7 @@ class AppGraph(val app: Application) {
         .build()
 
     val settings = SettingsRepository(app)
+    val servers = ServerRepository(app)
     val messages = Messages()
     private val db = KultrDLDatabase.open(app)
     val library = Library(db, scope)
@@ -51,6 +53,6 @@ class AppGraph(val app: Application) {
     val resolver = StreamResolver(library, catalog, ytDlp, settings, scope)
     val saver = MediaSaver(app)
     val youtubeCheck = YouTubeCheck(ytDlp, okHttp, settings)
-    val downloads = Downloads(app, db.downloads(), library, settings, resolver, ytDlp, saver, okHttp, scope)
+    val downloads = Downloads(app, db.downloads(), library, settings, servers, resolver, ytDlp, saver, okHttp, scope)
     val player = PlayerConnection(app, library, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
 }

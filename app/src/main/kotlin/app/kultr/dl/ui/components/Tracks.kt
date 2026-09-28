@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.BookmarkAdd
 import androidx.compose.material.icons.rounded.BookmarkRemove
+import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
@@ -187,6 +188,9 @@ fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit, extraActio
         MenuItem("Download", Icons.Rounded.Download, onDismiss) { actions.download(listOf(track)) }
         MenuItem("Download as…", Icons.Rounded.Tune, onDismiss) { actions.downloadAs(listOf(track)) }
         if (flags?.localUri != null) {
+            if (actions.graph.servers.servers.value.isNotEmpty()) {
+                MenuItem("Send to server…", Icons.Rounded.CloudUpload, onDismiss) { actions.sendToServer(listOf(track)) }
+            }
             MenuItem("Remove download", Icons.Rounded.Delete, onDismiss) { actions.removeDownload(track) }
         }
         if (track.needsMatch) {
