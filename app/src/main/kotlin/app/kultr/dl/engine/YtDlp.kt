@@ -13,6 +13,7 @@ import app.kultr.dl.core.model.MediaExtractor
 import app.kultr.dl.core.model.Track
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
+import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import com.yausername.youtubedl_android.YoutubeDLResponse
 import java.io.File
@@ -122,6 +123,10 @@ class YtDlp(private val context: Context, private val scope: CoroutineScope) : M
             request.addCommands(listOf("--cache-dir", cacheDir.absolutePath, "--no-warnings", "--socket-timeout", "20") + args)
             try {
                 runInterruptible { YoutubeDL.getInstance().execute(request, processId, progress) }
+            } catch (e: YoutubeDLException) {
+                Log.w(TAG, "yt-dlp failed: ${args.filter { it.startsWith("http") || it.contains("search") }.joinToString(" ")}")
+                e.message.orEmpty().lines().filter { it.isNotBlank() }.takeLast(60).forEach { Log.w(TAG, "  $it") }
+                throw e
             } catch (e: CancellationException) {
                 cancel(processId)
                 throw e

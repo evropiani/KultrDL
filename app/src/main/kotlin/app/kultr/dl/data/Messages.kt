@@ -24,7 +24,10 @@ class Messages {
 fun describe(error: Throwable): String {
     // Wrappers such as ExceptionInInitializerError carry the real reason in their cause.
     if (error.message.isNullOrBlank() && error.cause != null && error.cause !== error) return describe(error.cause!!)
-    val message = error.message?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
+    val lines = error.message?.lines()?.map { it.trim() }?.filter { it.isNotEmpty() }.orEmpty()
+    // yt-dlp reports on stderr: its own ERROR line says it best; a Python traceback ends with the exception.
+    val message = lines.lastOrNull { it.startsWith("ERROR:") }
+        ?: if (lines.firstOrNull()?.startsWith("Traceback") == true) lines.last() else lines.firstOrNull()
     return when {
         error is java.net.UnknownHostException -> "No connection."
         error is java.net.SocketTimeoutException -> "The server took too long to answer."

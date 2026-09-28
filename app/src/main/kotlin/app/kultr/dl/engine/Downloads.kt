@@ -218,6 +218,7 @@ class Downloads(
             val saved = saver.save(file, name, AudioFormat.mimeFor(ext), options.saveToMusic, track.title, track.artist, track.album)
             if (previous != null && previous != saved.uri.toString()) saver.delete(previous)
             library.setLocal(track.id, saved.uri.toString(), preset.label, saved.size)
+            Log.i("KultrDL", "Downloaded ${track.id} as ${preset.label}: ${saved.uri} (${saved.size} bytes)")
             dao.setProgress(row.trackId, 1f, null)
         } finally {
             dir.deleteRecursively()

@@ -17,7 +17,7 @@ adb shell pm grant "$PKG" android.permission.POST_NOTIFICATIONS || true
 adb logcat -v time > "$OUT/logcat.txt" 2>&1 &
 
 log_has() { grep -q -E "$1" "$OUT/logcat.txt"; }
-app_log() { grep -E "/KultrDL\(|FATAL EXCEPTION|E/AndroidRuntime" "$OUT/logcat.txt" | grep -v uiautomator; }
+app_log() { grep -E "/KultrDL *\(|FATAL EXCEPTION|E/AndroidRuntime" "$OUT/logcat.txt" | grep -v uiautomator; }
 screenshot() { adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null || true; }
 dump_ui() {
   adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
@@ -65,7 +65,7 @@ for link in "${LINKS[@]}"; do
     echo "Opened; pressed Play"
     playing=0
     for _ in $(seq 1 30); do
-      if adb shell dumpsys media_session | grep -q "state=PlaybackState {state=3"; then playing=1; break; fi
+      if log_has "KultrDL *\(.*Playing "; then playing=1; break; fi
       sleep 2
     done
     screenshot "play-$(basename "$link")"
@@ -85,12 +85,11 @@ if [ -z "$played_from" ]; then
 else
   [ "$played_from" = "${LINKS[0]}" ] || warnings+=("YouTube didn't play on this CI machine; Bandcamp did")
   echo "== Download"
-  adb shell input keyevent KEYCODE_BACK >/dev/null 2>&1 || true
-  sleep 1
   if tap_text "Download" || { sleep 2; tap_text "Download"; }; then
     saved=0
     for _ in $(seq 1 90); do
       if adb shell ls /sdcard/Music/KultrDL/ 2>/dev/null | grep -q -i "\.mp3"; then saved=1; break; fi
+      if log_has "Download of .* failed"; then break; fi
       sleep 3
     done
     adb shell ls -l /sdcard/Music/KultrDL/ 2>/dev/null || true

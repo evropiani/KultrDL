@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.util.Log
 import app.kultr.dl.engine.DownloadWorker
 import app.kultr.dl.engine.YtDlp
 import coil3.ImageLoader
@@ -47,6 +48,8 @@ class KultrDLApp : Application(), SingletonImageLoader.Factory {
             if (!settings.autoUpdateEngine || now - settings.lastEngineCheck < 24 * 3600_000L) return@launch
             delay(8_000)
             runCatching { graph.ytDlp.update() }
+                .onSuccess { Log.i("KultrDL", "yt-dlp is now $it") }
+                .onFailure { Log.w("KultrDL", "yt-dlp update failed", it) }
             graph.settings.update { it.copy(lastEngineCheck = now) }
         }
     }

@@ -96,6 +96,7 @@ class PlaybackService : MediaSessionService() {
             Log.e(TAG, "Couldn't resolve $trackId", e)
             throw IOException(describe(e), e)
         }
+        Log.i(TAG, "Resolved $trackId: ${if (resolved is StreamResolver.Resolved.Local) "downloaded file" else "stream"}")
         return when (resolved) {
             is StreamResolver.Resolved.Local -> spec.withUri(resolved.uri)
             is StreamResolver.Resolved.Remote -> spec.buildUpon()
@@ -140,7 +141,12 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (isPlaying) player.currentMediaItem?.mediaId?.let { retried.remove(it) }
+            if (isPlaying) {
+                player.currentMediaItem?.let { item ->
+                    retried.remove(item.mediaId)
+                    Log.i(TAG, "Playing ${item.mediaId}")
+                }
+            }
         }
     }
 
