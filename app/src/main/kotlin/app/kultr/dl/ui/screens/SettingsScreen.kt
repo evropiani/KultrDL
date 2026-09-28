@@ -422,7 +422,7 @@ private fun AboutSection() {
         TextButton(onClick = { actions.openInBrowser("https://github.com/evropiani/KultrDL/releases/latest") }) { Text("Latest release") }
     }
     Text(
-        "Free software under the GNU GPL v3. Built with yt-dlp, youtubedl-android, ffmpeg, Media3, jaudiotagger and the Kultr design.",
+        "Free software under the GNU GPL v3. Built with yt-dlp, youtubedl-android, ffmpeg, Media3, jaudiotagger, JSch, Apache Commons Net, Bouncy Castle and the Kultr design.",
         style = MaterialTheme.typography.bodySmall,
         color = Kultr.colors.ink3,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),

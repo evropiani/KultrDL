@@ -40,6 +40,21 @@ playing.
   as…”, or have KultrDL ask every time. Files get the track's title, artist,
   album, year, track number, genre and cover art, and are saved to
   `Music/KultrDL`, where other music apps find them.
+- **Straight to your server.** Save FTP, FTPS or SFTP servers — a NAS, a
+  seedbox, a Plex, Jellyfin or Navidrome box — with the folders music should go
+  to (type them or browse the server), then choose one when you download.
+  KultrDL converts and tags the file on the phone and uploads it, optionally
+  into Artist or Artist/Album folders, keeping a copy on the phone if you like.
+  Tracks already downloaded can be sent too (“Send to server…”).
+
+  | Protocol | Signs in with | Trust |
+  | --- | --- | --- |
+  | SFTP | password or SSH key (OpenSSH, PEM or PuTTY, Ed25519, ECDSA or RSA, with or without a passphrase) | the server's key is saved the first time; if it changes, KultrDL stops and asks |
+  | FTPS (explicit or implicit TLS) | password | certificates the phone trusts, or a self-signed one you approve by its fingerprint |
+  | FTP | password or anonymous | none — unencrypted |
+
+  Passwords and keys are encrypted with a key kept in the Android Keystore.
+  Backups include the servers and their folders but not their passwords.
 
 ## Where the audio comes from
 
@@ -89,7 +104,7 @@ Requirements: JDK 17 or newer and the Android SDK (compile SDK 37).
 
 ```sh
 ./gradlew :app:assembleDebug        # app/build/outputs/apk/debug/
-./gradlew :core:test                # catalogue, link and matching tests
+./gradlew :core:test                # catalogue, link, matching and FTP/SFTP tests
 ./gradlew :app:assembleRelease      # signed, R8-shrunk APKs
 ```
 
@@ -98,10 +113,10 @@ run as `kultrdl-debug-apk`.
 
 ### Releasing
 
-Bump `versionCode` and `versionName` in `app/build.gradle.kts`, add notes as
-`.github/release-notes/v<version>.md`, then push a matching tag
-(`git tag v1.0.1 && git push origin v1.0.1`) or run the **Release** workflow
-from the Actions tab with that tag.
+Bump `versionCode` and `versionName` in `app/build.gradle.kts` and add notes as
+`.github/release-notes/v<version>.md`. Pushing that to `main` publishes the
+release (the **Release** workflow skips versions that already have one); a
+`v<version>` tag or running the workflow by hand does the same.
 
 ### Signing
 
@@ -119,7 +134,7 @@ first (Settings → Backup and reset).
 
 | Module | What it holds |
 | --- | --- |
-| `core` | Plain Kotlin, no Android: the catalogue clients (YouTube Music and YouTube search, the iTunes Search API, Deezer's API, Spotify's embed pages and Web API, Bandcamp, song.link, page metadata), link recognition, reading yt-dlp's JSON, and the matcher that finds a catalogue track's recording. Unit-tested on the JVM. |
+| `core` | Plain Kotlin, no Android: the catalogue clients (YouTube Music and YouTube search, the iTunes Search API, Deezer's API, Spotify's embed pages and Web API, Bandcamp, song.link, page metadata), link recognition, reading yt-dlp's JSON, the matcher that finds a catalogue track's recording, and FTP/FTPS (Apache Commons Net) and SFTP (JSch with Bouncy Castle) uploads. Unit-tested on the JVM, the transfers against real SSH and FTP servers. |
 | `app` | The Android app: Room for the library and download queue, yt-dlp and ffmpeg through youtubedl-android, a WorkManager download worker, tagging with jaudiotagger, a Media3 playback service that resolves each queue entry to a downloaded file or a stream as it plays, and the Jetpack Compose interface with Kultr's liquid glass. |
 
 ## License
