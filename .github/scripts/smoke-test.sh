@@ -49,12 +49,12 @@ tap_attr() {
 }
 SIZE=$(adb shell wm size | grep -o '[0-9]*x[0-9]*' | tail -1)
 W=${SIZE%x*}; H=${SIZE#*x}
-# Close the on-screen keyboard if it is up (Back would leave the page if it isn't).
-hide_keyboard() {
-  if adb shell dumpsys input_method | grep -q -E "mInputShown=true|mIsInputViewShown=true|isInputViewShown=true"; then
-    adb shell input keyevent 4
-    sleep 2
-  fi
+# The server screens are filled in with typed keys, so the on-screen keyboard is switched off
+# (see no_soft_keyboard): it would cover the page, and Back to close it can leave the page instead.
+hide_keyboard() { sleep 1; }
+no_soft_keyboard() {
+  for ime in $(adb shell ime list -s | tr -d '\r'); do adb shell ime disable "$ime" >/dev/null; done
+  echo "  on-screen keyboards left: $(adb shell ime list -s | tr -d '\r' | tr '\n' ' ')"
 }
 # Scroll the page down, well above where the keyboard would be.
 swipe_up() { hide_keyboard; adb shell input swipe $((W / 2)) $((H * 55 / 100)) $((W / 2)) $((H * 20 / 100)) 400; sleep 1; }
@@ -183,9 +183,7 @@ diag_windows() {
 dialog_open() { adb shell dumpsys window | grep -m1 mCurrentFocus | grep -q -v "MainActivity"; }
 # The folder dialog's field takes focus when it opens, and Done confirms it.
 add_folder() {
-  hide_keyboard
   # Bring the folder buttons up the page, clear of the player and tab bar floating at the bottom.
-  swipe_up
   swipe_up
   echo "    before tapping Type a path:"
   dump_ui && nodes | sed 's/^/      /'
@@ -226,6 +224,7 @@ add_server() { # name, protocol, port, folder
 }
 
 if [ -n "$played_from" ]; then
+  no_soft_keyboard
   echo "== SFTP server"
   if add_server CI-SFTP SFTP 2222 music; then
     sleep 2
