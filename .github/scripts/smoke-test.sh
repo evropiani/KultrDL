@@ -52,6 +52,18 @@ swipe_up() { adb shell input swipe $((W / 2)) $((H * 7 / 10)) $((W / 2)) $((H * 
 # Run a tap command, scrolling the page down until it finds its target.
 tap_scrolling() { for _ in 1 2 3 4 5 6; do "$@" && return 0; swipe_up; done; return 1; }
 type_into() { tap_scrolling tap_attr resource-id "$1" || return 1; sleep 1; adb shell input text "$2"; sleep 1; }
+# Open a tab of the floating bar. While a search is open the bar shows a back button
+# instead of the tabs, so go back (and bring the app forward again) until they show.
+go_tab() {
+  for _ in 1 2 3 4; do
+    tap_attr content-desc "$1" && { sleep 2; return 0; }
+    adb shell input keyevent 4
+    sleep 2
+    adb shell am start -n "$PKG/.MainActivity" >/dev/null 2>&1
+    sleep 2
+  done
+  return 1
+}
 wait_screen() { for _ in $(seq 1 "$2"); do screen_text | grep -q -E "$1" && return 0; sleep 2; done; return 1; }
 
 echo "== Launch"
@@ -121,8 +133,7 @@ fi
 # machine, which the emulator reaches as 10.0.2.2. Both are added through the app's own
 # screens; a downloaded track is sent to the SFTP one, and a new download goes straight to FTP.
 add_server() { # name, protocol, port, folder
-  tap_attr content-desc "Settings" || return 1
-  sleep 2
+  go_tab "Settings" || return 1
   tap_scrolling tap_text "Servers" || return 1
   sleep 2
   tap_text "Add server" || return 1
@@ -154,8 +165,8 @@ if [ -n "$played_from" ]; then
   echo "== SFTP server"
   if add_server CI-SFTP SFTP 2222 music; then
     sleep 2
-    tap_attr content-desc "Downloads"
-    sleep 3
+    go_tab "Downloads"
+    sleep 1
     if tap_scrolling tap_attr content-desc "Send to server" && sleep 2 && tap_text "Send"; then
       for _ in $(seq 1 40); do log_has "Sent .* to SFTP 10.0.2.2" && break; log_has "Download of .* failed" && break; sleep 2; done
       screenshot sftp-sent
@@ -172,8 +183,7 @@ if [ -n "$played_from" ]; then
   echo "== FTP server"
   if add_server CI-FTP FTP 2121 music; then
     sleep 2
-    tap_attr content-desc "Settings"
-    sleep 2
+    go_tab "Settings"
     if tap_scrolling tap_text "Save to" && sleep 2 && tap_text "CI-FTP" && tap_text "Save"; then
       if open_link "${LINKS[1]}" && sleep 2 && { tap_text "Download" || { sleep 2; tap_text "Download"; }; }; then
         for _ in $(seq 1 90); do log_has "Sent .* to FTP 10.0.2.2" && break; log_has "Download of .* failed" && break; sleep 3; done
