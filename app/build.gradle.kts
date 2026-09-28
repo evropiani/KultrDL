@@ -78,6 +78,8 @@ android {
         // youtubedl-android runs Python and ffmpeg from the extracted native library directory.
         jniLibs {
             useLegacyPackaging = true
+            // Prebuilt and already stripped (the Python and ffmpeg archives are not ELF at all).
+            keepDebugSymbols += "**/*.so"
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

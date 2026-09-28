@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">KultrDL</string>
+    <string name="share_label">Open in KultrDL</string>
+    <string name="channel_downloads">Downloads</string>
+</resources>

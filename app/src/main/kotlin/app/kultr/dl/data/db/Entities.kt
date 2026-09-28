@@ -1,0 +1,161 @@
+package app.kultr.dl.data.db
+
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+import app.kultr.dl.core.model.Source
+import app.kultr.dl.core.model.Track
+
+/**
+ * Every track the app has touched: saved, favourited, downloaded, played,
+ * or just queued. Catalogue metadata lives alongside what the user did
+ * with it, and [matchedUrl] remembers which recording plays it.
+ */
+@Entity(tableName = "tracks", indices = [Index("favorite"), Index("saved"), Index("lastPlayedAt")])
+data class TrackEntity(
+    @PrimaryKey val id: String,
+    val source: String,
+    val title: String,
+    val artist: String,
+    val album: String? = null,
+    val albumArtist: String? = null,
+    val durationMs: Long? = null,
+    val artworkUrl: String? = null,
+    val pageUrl: String? = null,
+    val streamUrl: String? = null,
+    val matchUrl: String? = null,
+    val isrc: String? = null,
+    val year: Int? = null,
+    val trackNumber: Int? = null,
+    val discNumber: Int? = null,
+    val genre: String? = null,
+    val explicit: Boolean = false,
+    val matchedUrl: String? = null,
+    val favorite: Boolean = false,
+    val favoritedAt: Long? = null,
+    val saved: Boolean = false,
+    val savedAt: Long? = null,
+    val playCount: Int = 0,
+    val lastPlayedAt: Long? = null,
+    val localUri: String? = null,
+    val localFormat: String? = null,
+    val localSize: Long? = null,
+    val downloadedAt: Long? = null,
+    val addedAt: Long = System.currentTimeMillis(),
+) {
+    fun toTrack(): Track = Track(
+        id = id,
+        source = runCatching { Source.valueOf(source) }.getOrDefault(Source.WEB),
+        title = title,
+        artist = artist,
+        album = album,
+        albumArtist = albumArtist,
+        durationMs = durationMs,
+        artworkUrl = artworkUrl,
+        pageUrl = pageUrl,
+        streamUrl = streamUrl,
+        matchUrl = matchUrl,
+        isrc = isrc,
+        year = year,
+        trackNumber = trackNumber,
+        discNumber = discNumber,
+        genre = genre,
+        explicit = explicit,
+    )
+
+    /** New catalogue details over what is stored, keeping what the user did with it. */
+    fun withMetadata(t: Track): TrackEntity = copy(
+        source = t.source.name,
+        title = t.title,
+        artist = t.artist,
+        album = t.album ?: album,
+        albumArtist = t.albumArtist ?: albumArtist,
+        durationMs = t.durationMs ?: durationMs,
+        artworkUrl = t.artworkUrl ?: artworkUrl,
+        pageUrl = t.pageUrl ?: pageUrl,
+        streamUrl = t.streamUrl ?: streamUrl,
+        matchUrl = t.matchUrl ?: matchUrl,
+        isrc = t.isrc ?: isrc,
+        year = t.year ?: year,
+        trackNumber = t.trackNumber ?: trackNumber,
+        discNumber = t.discNumber ?: discNumber,
+        genre = t.genre ?: genre,
+        explicit = t.explicit || explicit,
+    )
+
+    companion object {
+        fun from(t: Track): TrackEntity = TrackEntity(id = t.id, source = t.source.name, title = t.title, artist = t.artist).withMetadata(t)
+    }
+}
+
+@Entity(tableName = "playlists")
+data class PlaylistEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** The page it was imported from, if it was. */
+    val sourceUrl: String? = null,
+    val artworkUrl: String? = null,
+)
+
+@Entity(tableName = "playlist_tracks", primaryKeys = ["playlistId", "position"], indices = [Index("trackId")])
+data class PlaylistTrackEntity(
+    val playlistId: Long,
+    val position: Int,
+    val trackId: String,
+)
+
+enum class DownloadState { QUEUED, RUNNING, DONE, FAILED, CANCELLED }
+
+@Entity(tableName = "downloads", indices = [Index("state")])
+data class DownloadEntity(
+    @PrimaryKey val trackId: String,
+    val state: String,
+    val format: String,
+    val quality: String,
+    val progress: Float = 0f,
+    val message: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+) {
+    val downloadState: DownloadState get() = runCatching { DownloadState.valueOf(state) }.getOrDefault(DownloadState.FAILED)
+}
+
+@Entity(tableName = "searches")
+data class SearchEntity(
+    @PrimaryKey val query: String,
+    val at: Long = System.currentTimeMillis(),
+)
+
+/** A playlist row with its size, for lists. */
+data class PlaylistSummary(
+    val id: Long,
+    val name: String,
+    val artworkUrl: String?,
+    val updatedAt: Long,
+    val count: Int,
+)
+
+/** A download row with the track it is for. */
+data class DownloadWithTrack(
+    val trackId: String,
+    val state: String,
+    val format: String,
+    val quality: String,
+    val progress: Float,
+    val message: String?,
+    val updatedAt: Long,
+    val title: String,
+    val artist: String,
+    val artworkUrl: String?,
+    val localUri: String?,
+)
+
+/** What the user has done with a track, for hearts and badges in lists. */
+data class TrackFlags(
+    val id: String,
+    val favorite: Boolean,
+    val saved: Boolean,
+    val localUri: String?,
+)
