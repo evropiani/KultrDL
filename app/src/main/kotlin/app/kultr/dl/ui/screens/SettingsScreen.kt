@@ -1,5 +1,7 @@
 package app.kultr.dl.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -14,12 +16,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -62,6 +67,7 @@ import app.kultr.dl.data.Settings
 import app.kultr.dl.data.StreamQuality
 import app.kultr.dl.data.ThemeMode
 import app.kultr.dl.data.describe
+import app.kultr.dl.engine.YouTubeProfile
 import app.kultr.dl.engine.YtDlp
 import app.kultr.dl.ui.LocalActions
 import app.kultr.dl.ui.chromePadding
@@ -245,6 +251,66 @@ private fun EngineSettings(s: Settings, update: ((Settings) -> Settings) -> Unit
         })
     }
     Toggle("Update automatically", s.autoUpdateEngine, hint = "Check for a new yt-dlp once a day.") { v -> update { it.copy(autoUpdateEngine = v) } }
+    YouTubeSettings(s, update)
+}
+
+/**
+ * YouTube can refuse one way of asking for a stream (HTTP 403) on some
+ * networks. KultrDL switches by itself; this shows which one is in use,
+ * lets it be picked, and tests them all with a copyable report.
+ */
+@Composable
+private fun YouTubeSettings(s: Settings, update: ((Settings) -> Settings) -> Unit) {
+    val actions = LocalActions.current
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var testing by remember { mutableStateOf<String?>(null) }
+    var report by remember { mutableStateOf<String?>(null) }
+    Choice(
+        "YouTube connection",
+        YouTubeProfile.entries.map { it to it.label },
+        s.youtubeProfile,
+        hint = "If YouTube refuses a song (error 403), KultrDL tries the others and keeps the one that works.",
+    ) { v -> update { it.copy(youtubeProfile = v) } }
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Pill(testing ?: "Test YouTube", enabled = testing == null, onClick = {
+            testing = "Starting…"
+            scope.launch {
+                try {
+                    val outcome = actions.graph.youtubeCheck.run { step -> testing = step }
+                    report = outcome.report
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    report = "The test couldn't run: ${describe(e)}"
+                } finally {
+                    testing = null
+                }
+            }
+        })
+    }
+    report?.let { text ->
+        AlertDialog(
+            onDismissRequest = { report = null },
+            containerColor = Kultr.colors.elevated,
+            title = { Text("YouTube test") },
+            text = {
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Kultr.colors.ink2,
+                    modifier = Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    clipboard.setPrimaryClip(ClipData.newPlainText("KultrDL YouTube test", text))
+                    actions.graph.messages.show("Report copied")
+                }) { Text("Copy report") }
+            },
+            dismissButton = { TextButton(onClick = { report = null }) { Text("Close") } },
+        )
+    }
 }
 
 @Composable

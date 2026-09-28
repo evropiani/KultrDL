@@ -116,12 +116,14 @@ class YtDlp(private val context: Context, private val scope: CoroutineScope) : M
     suspend fun run(
         args: List<String>,
         processId: String = UUID.randomUUID().toString(),
+        warnings: Boolean = false,
         progress: ((Float, Long, String) -> Unit)? = null,
     ): YoutubeDLResponse = withContext(Dispatchers.IO) {
         ensureReady()
         permits.withPermit {
             val request = YoutubeDLRequest(emptyList<String>())
-            request.addCommands(listOf("--cache-dir", cacheDir.absolutePath, "--no-warnings", "--socket-timeout", "20") + args)
+            val quiet = if (warnings) emptyList() else listOf("--no-warnings")
+            request.addCommands(listOf("--cache-dir", cacheDir.absolutePath, "--socket-timeout", "20") + quiet + args)
             try {
                 runInterruptible { YoutubeDL.getInstance().execute(request, processId, progress) }
             } catch (e: YoutubeDLException) {

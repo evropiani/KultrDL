@@ -8,6 +8,7 @@ import app.kultr.dl.core.util.list
 import app.kultr.dl.core.util.parseJson
 import app.kultr.dl.core.util.str
 import app.kultr.dl.data.Library
+import app.kultr.dl.data.SettingsRepository
 import app.kultr.dl.data.StreamQuality
 import java.io.File
 import java.io.IOException
@@ -28,8 +29,8 @@ class StreamResolver(
     private val library: Library,
     private val catalog: Catalog,
     private val ytDlp: YtDlp,
+    private val settings: SettingsRepository,
     private val scope: CoroutineScope,
-    private val quality: () -> StreamQuality,
 ) {
     sealed interface Resolved {
         data class Local(val uri: Uri) : Resolved
@@ -40,6 +41,36 @@ class StreamResolver(
 
     private val cache = ConcurrentHashMap<String, Cached>()
     private val inFlight = ConcurrentHashMap<String, Deferred<Resolved>>()
+
+    /** YouTube profiles already refused for a track, and the one it is on now. */
+    private val tried = ConcurrentHashMap<String, MutableSet<YouTubeProfile>>()
+    private val current = ConcurrentHashMap<String, YouTubeProfile>()
+
+    private val preferred: YouTubeProfile get() = settings.settings.value.youtubeProfile
+
+    /**
+     * YouTube refused [trackId]'s stream: move it to the next profile.
+     * False when it isn't a YouTube stream or every profile has been tried.
+     */
+    fun tryNextProfile(trackId: String): Boolean {
+        val profile = current[trackId] ?: return false
+        val refused = tried.getOrPut(trackId) { mutableSetOf() }.apply { add(profile) }
+        val next = preferred.order().firstOrNull { it !in refused } ?: return false
+        current[trackId] = next
+        invalidate(trackId)
+        return true
+    }
+
+    /** [trackId] is playing: its profile works, so start with it from now on. */
+    fun onPlaying(trackId: String) {
+        tried.remove(trackId)
+        val profile = current[trackId] ?: return
+        if (profile != preferred) settings.update { it.copy(youtubeProfile = profile) }
+    }
+
+    fun remember(profile: YouTubeProfile) {
+        if (profile != preferred) settings.update { it.copy(youtubeProfile = profile) }
+    }
 
     fun invalidate(trackId: String) {
         cache.remove(trackId)
@@ -72,12 +103,14 @@ class StreamResolver(
     private suspend fun fetch(trackId: String): Resolved {
         val track = library.track(trackId) ?: throw IOException("Unknown track")
         val source = sourceUrl(track)
-        val format = when (quality()) {
+        val profile = if (YouTubeProfile.isYouTube(source)) current.getOrPut(trackId) { preferred } else null
+        val format = when (settings.settings.value.streamQuality) {
             StreamQuality.HIGH -> "bestaudio[protocol^=http][ext=m4a]/bestaudio[protocol^=http]/bestaudio/best"
             StreamQuality.SAVER -> "worstaudio[abr>=64][protocol^=http]/bestaudio[abr<=96]/worstaudio/bestaudio/best"
         }
-        val json = parseJson(ytDlp.describe(source, "-f", format))
+        val json = parseJson(ytDlp.describe(source, "-f", format, *profile?.args.orEmpty().toTypedArray()))
         val remote = pickStream(json) ?: throw IOException("No audio stream found for “${track.title}”.")
+        StreamDns.pin(remote.url)
         cache[trackId] = Cached(remote, expiry(remote.url))
         return remote
     }

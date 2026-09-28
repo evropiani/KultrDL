@@ -9,7 +9,9 @@ import app.kultr.dl.data.SettingsRepository
 import app.kultr.dl.data.db.KultrDLDatabase
 import app.kultr.dl.engine.Downloads
 import app.kultr.dl.engine.MediaSaver
+import app.kultr.dl.engine.StreamDns
 import app.kultr.dl.engine.StreamResolver
+import app.kultr.dl.engine.YouTubeCheck
 import app.kultr.dl.engine.YtDlp
 import app.kultr.dl.playback.PlayerConnection
 import java.util.Locale
@@ -27,6 +29,7 @@ class AppGraph(val app: Application) {
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
+        .dns(StreamDns)
         .build()
 
     val settings = SettingsRepository(app)
@@ -45,8 +48,9 @@ class AppGraph(val app: Application) {
         },
     )
 
-    val resolver = StreamResolver(library, catalog, ytDlp, scope) { settings.settings.value.streamQuality }
+    val resolver = StreamResolver(library, catalog, ytDlp, settings, scope)
     val saver = MediaSaver(app)
+    val youtubeCheck = YouTubeCheck(ytDlp, okHttp, settings)
     val downloads = Downloads(app, db.downloads(), library, settings, resolver, ytDlp, saver, okHttp, scope)
     val player = PlayerConnection(app, library, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
 }

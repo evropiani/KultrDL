@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import app.kultr.dl.core.model.Source
 import app.kultr.dl.core.util.LenientJson
 import app.kultr.dl.engine.DownloadPreset
+import app.kultr.dl.engine.YouTubeProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,6 +35,7 @@ data class Settings(
     val wifiOnly: Boolean = false,
     val embedArtwork: Boolean = true,
     val streamQuality: StreamQuality = StreamQuality.HIGH,
+    val youtubeProfile: YouTubeProfile = YouTubeProfile.DEFAULT,
     val autoUpdateEngine: Boolean = true,
     val lastEngineCheck: Long = 0,
 )

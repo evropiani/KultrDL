@@ -27,6 +27,7 @@ import app.kultr.dl.data.db.DownloadEntity
 import app.kultr.dl.data.db.DownloadState
 import app.kultr.dl.data.db.DownloadWithTrack
 import app.kultr.dl.data.describe
+import com.yausername.youtubedl_android.YoutubeDLException
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
@@ -183,7 +184,7 @@ class Downloads(
         dir.deleteRecursively()
         dir.mkdirs()
         try {
-            val args = preset.ytDlpOptions() + listOf(
+            val common = preset.ytDlpOptions() + listOf(
                 "--no-playlist",
                 "--newline",
                 "--no-mtime",
@@ -194,13 +195,26 @@ class Downloads(
                 "--no-embed-info-json",
                 "--postprocessor-args", "Metadata+ffmpeg_o:" + metadataArgs(track),
                 "-o", File(dir, "audio.%(ext)s").absolutePath,
-                source,
             )
-            ytDlp.run(args, processId(row.trackId)) { percent, _, line ->
-                val fraction = (percent / 100f).coerceIn(0f, 1f)
-                val stage = if (line.contains("[ExtractAudio]") || line.contains("[Metadata]")) "Converting…" else "Downloading…"
-                onProgress(fraction * 0.9f, stage)
-                scope.launch { dao.setProgress(row.trackId, fraction * 0.9f, stage) }
+            // YouTube may refuse one way of asking for the stream (HTTP 403) and accept another.
+            val profiles: List<YouTubeProfile?> =
+                if (YouTubeProfile.isYouTube(source)) options.youtubeProfile.order() else listOf(null)
+            for ((attempt, profile) in profiles.withIndex()) {
+                try {
+                    ytDlp.run(common + profile?.args.orEmpty() + source, processId(row.trackId), progress = { percent, _, line ->
+                        val fraction = (percent / 100f).coerceIn(0f, 1f)
+                        val stage = if (line.contains("[ExtractAudio]") || line.contains("[Metadata]")) "Converting…" else "Downloading…"
+                        onProgress(fraction * 0.9f, stage)
+                        scope.launch { dao.setProgress(row.trackId, fraction * 0.9f, stage) }
+                    })
+                    if (profile != null) resolver.remember(profile)
+                    break
+                } catch (e: YoutubeDLException) {
+                    if (profile == null || attempt == profiles.lastIndex || !YouTubeProfile.isForbidden(e)) throw e
+                    Log.i("KultrDL", "YouTube refused ${profile.label} for ${row.trackId}; trying ${profiles[attempt + 1]?.label}")
+                    dir.listFiles()?.forEach { it.delete() }
+                    onProgress(0f, "Trying another way…")
+                }
             }
             val file = dir.listFiles()
                 ?.filter { it.isFile && it.name.startsWith("audio.") && it.extension.lowercase() !in SIDE_FILES }

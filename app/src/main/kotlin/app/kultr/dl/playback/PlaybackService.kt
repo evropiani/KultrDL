@@ -25,6 +25,7 @@ import app.kultr.dl.data.describe
 import app.kultr.dl.engine.HlsConcatDataSource
 import app.kultr.dl.engine.RoutingDataSource
 import app.kultr.dl.engine.StreamResolver
+import app.kultr.dl.engine.YouTubeProfile
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import java.io.IOException
@@ -120,14 +121,23 @@ class PlaybackService : MediaSessionService() {
             val graph = KultrDLApp.graph
             val item = player.currentMediaItem ?: return
             val id = item.mediaId
-            // A stream link can expire or be refused: look it up again once, from where it stopped.
-            if (id !in retried) {
-                retried += id
-                graph.resolver.invalidate(id)
-                val position = player.currentPosition
+            val position = player.currentPosition
+            fun again() {
                 player.seekTo(player.currentMediaItemIndex, position)
                 player.prepare()
                 player.play()
+            }
+            // YouTube refused this way of asking for the stream: try the next one.
+            if (YouTubeProfile.isForbidden(error) && graph.resolver.tryNextProfile(id)) {
+                Log.i(TAG, "YouTube refused the stream of $id; trying another client")
+                again()
+                return
+            }
+            // A stream link can expire or drop: look it up again once, from where it stopped.
+            if (id !in retried) {
+                retried += id
+                graph.resolver.invalidate(id)
+                again()
                 return
             }
             val title = item.mediaMetadata.title ?: "this track"
@@ -144,6 +154,7 @@ class PlaybackService : MediaSessionService() {
             if (isPlaying) {
                 player.currentMediaItem?.let { item ->
                     retried.remove(item.mediaId)
+                    KultrDLApp.graph.resolver.onPlaying(item.mediaId)
                     Log.i(TAG, "Playing ${item.mediaId}")
                 }
             }
