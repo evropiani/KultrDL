@@ -60,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
@@ -256,6 +257,8 @@ fun ServerEditorScreen(id: String) {
     var typingFolder by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     val colors = Kultr.colors
+    // Leaving a field before a dialog opens keeps the page from jumping back to it afterwards.
+    val focus = LocalFocusManager.current
 
     fun test() {
         testing = true
@@ -416,8 +419,8 @@ fun ServerEditorScreen(id: String) {
                 }
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Pill("Browse…", icon = Icons.Rounded.FolderOpen, enabled = draft.valid, onClick = { browsing = true })
-                Pill("Type a path", icon = Icons.Rounded.CreateNewFolder, onClick = { typingFolder = true }, modifier = Modifier.testTag("folder-type"))
+                Pill("Browse…", icon = Icons.Rounded.FolderOpen, enabled = draft.valid, onClick = { focus.clearFocus(); browsing = true })
+                Pill("Type a path", icon = Icons.Rounded.CreateNewFolder, onClick = { focus.clearFocus(); typingFolder = true }, modifier = Modifier.testTag("folder-type"))
             }
             Text("Inside the folder", style = MaterialTheme.typography.labelLarge, color = colors.ink2)
             Segmented(
@@ -445,7 +448,7 @@ fun ServerEditorScreen(id: String) {
                 if (testing) "Testing…" else "Test connection",
                 icon = Icons.Rounded.NetworkCheck,
                 enabled = draft.valid && !testing,
-                onClick = ::test,
+                onClick = { focus.clearFocus(); test() },
                 modifier = Modifier.weight(1f).testTag("server-test"),
             )
             Pill("Save", accent = true, enabled = draft.valid, modifier = Modifier.weight(1f).testTag("server-save"), onClick = {

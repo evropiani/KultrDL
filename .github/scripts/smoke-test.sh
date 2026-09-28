@@ -19,8 +19,10 @@ adb logcat -v time > "$OUT/logcat.txt" 2>&1 &
 log_has() { grep -q -E "$1" "$OUT/logcat.txt"; }
 app_log() { grep -E "/KultrDL *\(|FATAL EXCEPTION|E/AndroidRuntime" "$OUT/logcat.txt" | grep -v uiautomator; }
 screenshot() { adb exec-out screencap -p > "$OUT/$1.png" 2>/dev/null || true; }
+# Every window, top-most first, so dialogs (windows of their own) are included.
 dump_ui() {
-  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
+  adb shell rm -f /sdcard/ui.xml
+  adb shell uiautomator dump --windows /sdcard/ui.xml >/dev/null 2>&1 || adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 || return 1
   adb pull /sdcard/ui.xml "$OUT/ui.xml" >/dev/null 2>&1 || return 1
 }
 # What the screen says, one text per line.
@@ -175,11 +177,9 @@ tap_last_field() {
   [ $# -ge 4 ] || return 1
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
-# Which window has focus, and whether uiautomator can see dialog windows (for diagnosis).
+# Which window has focus (for diagnosis).
 diag_windows() {
-  adb shell dumpsys window | grep -E "mCurrentFocus|mFocusedWindow" | head -3 | sed 's/^/      /'
-  adb shell uiautomator dump --windows /sdcard/uiw.xml 2>&1 | head -2 | sed 's/^/      dump --windows: /'
-  adb shell cat /sdcard/uiw.xml 2>/dev/null | grep -o 'text="[^"]*"' | head -12 | sed 's/^/      /'
+  adb shell dumpsys window | grep -E "mCurrentFocus" | head -1 | sed 's/^/      /'
 }
 dialog_open() { adb shell dumpsys window | grep -m1 mCurrentFocus | grep -q -v "MainActivity"; }
 # The folder dialog's field takes focus when it opens, and Done confirms it.
@@ -192,13 +192,15 @@ add_folder() {
   sleep 2
   echo "    after tapping Type a path:"
   diag_windows
+  wait_screen "Add a folder" 3 || echo "    (the dialog isn't in the dump; typing anyway)"
   adb shell input text "$1"
   sleep 1
   adb shell input keyevent 66
   sleep 2
-  hide_keyboard
-  wait_screen "^$1\$" 3
+  see_scrolling "$1"
 }
+# Scroll until a text is on screen.
+see_scrolling() { for _ in 1 2 3 4; do screen_text | grep -q -x "$1" && return 0; swipe_up; done; return 1; }
 add_server() { # name, protocol, port, folder
   step "open Settings" go_tab "Settings" || return 1
   step "open Servers" tap_scrolling tap_text "Servers" || return 1
