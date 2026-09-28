@@ -22,6 +22,8 @@ class Messages {
 
 /** A short, human reason for an exception. */
 fun describe(error: Throwable): String {
+    // Wrappers such as ExceptionInInitializerError carry the real reason in their cause.
+    if (error.message.isNullOrBlank() && error.cause != null && error.cause !== error) return describe(error.cause!!)
     val message = error.message?.lineSequence()?.firstOrNull { it.isNotBlank() }?.trim()
     return when {
         error is java.net.UnknownHostException -> "No connection."

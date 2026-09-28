@@ -2,6 +2,7 @@ package app.kultr.dl.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -84,11 +85,15 @@ class PlaybackService : MediaSessionService() {
 
     private fun resolve(spec: DataSpec, resolver: StreamResolver): DataSpec {
         val trackId = MediaItems.trackId(spec.uri) ?: return spec
+        // Anything thrown here reaches the player as a load error, never as a crash:
+        // an Error escaping the loader thread would take the whole app down.
         val resolved = try {
             runBlocking { resolver.resolve(trackId) }
         } catch (e: IOException) {
+            Log.w(TAG, "Couldn't resolve $trackId", e)
             throw e
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            Log.e(TAG, "Couldn't resolve $trackId", e)
             throw IOException(describe(e), e)
         }
         return when (resolved) {
@@ -110,6 +115,7 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            Log.w(TAG, "Playback error", error)
             val graph = KultrDLApp.graph
             val item = player.currentMediaItem ?: return
             val id = item.mediaId
@@ -143,6 +149,10 @@ class PlaybackService : MediaSessionService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = session?.player
         if (player == null || !player.playWhenReady || player.mediaItemCount == 0) stopSelf()
+    }
+
+    companion object {
+        private const val TAG = "KultrDL"
     }
 
     override fun onDestroy() {

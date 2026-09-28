@@ -13,6 +13,11 @@
 -keep class com.yausername.** { *; }
 -keep class com.fasterxml.jackson.** { *; }
 -dontwarn com.fasterxml.jackson.**
+# It unpacks Python and ffmpeg with commons-compress 1.12, whose zip reader creates
+# its extra-field classes with Class.newInstance() in a static initializer. R8 would
+# drop those constructors, and the initializer then fails (ExceptionInInitializerError).
+-keep class org.apache.commons.compress.** { *; }
+-keep class org.apache.commons.io.** { *; }
 -dontwarn org.apache.commons.compress.**
 -dontwarn org.apache.commons.io.**
 
