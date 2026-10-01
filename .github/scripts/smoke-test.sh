@@ -283,7 +283,7 @@ if [ -n "$played_from" ]; then
     step "tap Save" tap_scrolling tap_attr resource-id navidrome-save; then
     for _ in $(seq 1 40); do log_has "Navidrome: synced|Navidrome sync failed|Navidrome: .*Couldn" && break; sleep 2; done
     grep -E "Navidrome" "$OUT/logcat.txt" | grep KultrDL | tail -3
-    if log_has "Navidrome: synced [1-9]"; then echo "Navidrome synced"; else failures+=("Navidrome didn't sync"); fi
+    if log_has "Navidrome: synced [1-9]"; then echo "Navidrome synced"; else failures+=("Navidrome didn't sync"); screenshot navidrome-failed; screen_text | head -40; fi
     # The recommendations rebuild after the sync, from Navidrome's plays and the songs played here.
     before=$(grep -c "Recommendations ready" "$OUT/logcat.txt")
     for _ in $(seq 1 90); do [ "$(grep -c "Recommendations ready" "$OUT/logcat.txt")" -gt "$before" ] && break; sleep 2; done

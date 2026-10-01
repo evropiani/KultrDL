@@ -358,6 +358,7 @@ class Recommender(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.w(TAG, "Navidrome sync failed: ${describe(e)}", e)
             navidrome.update { it.copy(lastSync = "Couldn't sync: ${describe(e)}") }
             throw e
         }
