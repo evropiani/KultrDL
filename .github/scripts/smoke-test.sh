@@ -266,6 +266,39 @@ if [ -n "$played_from" ]; then
   else
     failures+=("couldn't add the FTP server"); screenshot ftp-add-failed; screen_text | head -40
   fi
+
+  echo "== Navidrome and recommendations"
+  if step "open Settings" go_tab "Settings" &&
+    step "open Recommendations" tap_scrolling tap_text "Recommendations" &&
+    step "open Navidrome" tap_scrolling tap_text "Navidrome" &&
+    step "type the address" type_into navidrome-url "10.0.2.2:4533" &&
+    step "type the username" type_into navidrome-user "admin" &&
+    step "type the password" type_into navidrome-password "kultr-pass" &&
+    step "tap Save" tap_scrolling tap_attr resource-id navidrome-save; then
+    for _ in $(seq 1 40); do log_has "Navidrome: synced|Navidrome sync failed|Navidrome: .*Couldn" && break; sleep 2; done
+    grep -E "Navidrome" "$OUT/logcat.txt" | grep KultrDL | tail -3
+    if log_has "Navidrome: synced [1-9]"; then echo "Navidrome synced"; else failures+=("Navidrome didn't sync"); fi
+    # The recommendations rebuild after the sync, from Navidrome's plays and the songs played here.
+    before=$(grep -c "Recommendations ready" "$OUT/logcat.txt")
+    for _ in $(seq 1 90); do [ "$(grep -c "Recommendations ready" "$OUT/logcat.txt")" -gt "$before" ] && break; sleep 2; done
+    grep -E "KultrDL.*Recommendations" "$OUT/logcat.txt" | tail -12
+    if [ "$(grep -c "Recommendations ready" "$OUT/logcat.txt")" -gt "$before" ]; then
+      echo "Recommendations built"
+      go_tab "Home"
+      sleep 3
+      screenshot for-you
+      if screen_text | grep -q -E "^For you$"; then
+        screen_text | grep -E "New releases|Made for you|Albums for you|Missing from your collection|Rediscover|Updated" | head -8
+      else
+        failures+=("no For you section on Home")
+      fi
+      grep -q -E "Recommendations ready: ([1-9][0-9]* new releases|[0-9]+ new releases, [1-9])" "$OUT/logcat.txt" || warnings+=("the recommendations came out empty")
+    else
+      failures+=("the recommendations didn't rebuild")
+    fi
+  else
+    failures+=("couldn't connect Navidrome")
+  fi
 fi
 screenshot 9-end
 

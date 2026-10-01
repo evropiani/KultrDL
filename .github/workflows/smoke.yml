@@ -38,6 +38,44 @@ jobs:
           for _ in $(seq 1 30); do nc -z 127.0.0.1 2121 && nc -z 127.0.0.1 2222 && break; sleep 1; done
           nc -z 127.0.0.1 2121 && nc -z 127.0.0.1 2222
 
+      - name: Check the recommendation sources against the real services
+        continue-on-error: true
+        env:
+          LIVE_SOURCES: "1"
+        run: ./gradlew --console=plain :core:test --tests 'app.kultr.dl.core.LiveSourcesTest'
+
+      - name: Start a Navidrome with a few songs and plays
+        run: |
+          command -v ffmpeg >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; }
+          mkdir -p /tmp/nd/data
+          while IFS='|' read -r artist album title; do
+            mkdir -p "/tmp/nd/music/$artist/$album"
+            ffmpeg -loglevel error -f lavfi -i "sine=frequency=440:duration=35" -metadata artist="$artist" -metadata album_artist="$artist" \
+              -metadata album="$album" -metadata title="$title" -metadata genre="Electronic" -q:a 9 "/tmp/nd/music/$artist/$album/$title.mp3"
+          done <<'SONGS'
+          Daft Punk|Discovery|One More Time
+          Daft Punk|Discovery|Aerodynamic
+          Massive Attack|Mezzanine|Teardrop
+          Air|Moon Safari|Sexy Boy
+          Portishead|Dummy|Roads
+          SONGS
+          sudo chmod -R a+rwX /tmp/nd
+          docker run -d --name navidrome -p 4533:4533 -v /tmp/nd/music:/music:ro -v /tmp/nd/data:/data \
+            -e ND_DEVAUTOCREATEADMINPASSWORD=kultr-pass -e ND_SCANNER_SCHEDULE=1m deluan/navidrome:latest
+          api="http://127.0.0.1:4533/rest"
+          auth="u=admin&p=kultr-pass&v=1.16.1&c=ci&f=json"
+          for _ in $(seq 1 60); do
+            n=$(curl -s "$api/search3.view?$auth&query=&songCount=50" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["subsonic-response"].get("searchResult3",{}).get("song",[])))' 2>/dev/null || echo 0)
+            [ "$n" -ge 5 ] && break
+            sleep 3
+          done
+          echo "Navidrome has $n songs"
+          # Play them a few times, so there is history to learn from.
+          for id in $(curl -s "$api/search3.view?$auth&query=&songCount=50" | python3 -c 'import sys,json; print(" ".join(s["id"] for s in json.load(sys.stdin)["subsonic-response"]["searchResult3"]["song"]))'); do
+            for _ in 1 2 3; do curl -s "$api/scrobble.view?$auth&id=$id&submission=true" >/dev/null; done
+          done
+          [ "$n" -ge 5 ]
+
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules

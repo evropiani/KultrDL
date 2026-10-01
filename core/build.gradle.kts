@@ -42,4 +42,5 @@ tasks.test {
     environment("LC_ALL", "C.UTF-8")
     // LiveSourcesTest runs only with LIVE_SOURCES=1; make the switch an input so it isn't skipped as up to date.
     inputs.property("liveSources", System.getenv("LIVE_SOURCES") ?: "")
+    if (System.getenv("LIVE_SOURCES") == "1") testLogging { showStandardStreams = true }
 }

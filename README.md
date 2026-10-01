@@ -56,6 +56,25 @@ playing.
   Passwords and keys are encrypted with a key kept in the Android Keystore.
   Backups include the servers and their folders but not their passwords.
 
+- **Suggestions, made on the phone.** “For you” on Home shows new releases from
+  the artists you play, mixes made for you (Daily Mixes, Release Radar,
+  Discover, “Because you play…”), albums to try, albums missing from your
+  collection, and old favourites to rediscover. It learns from what you play,
+  skip, heart, save, download and put in playlists — and, if you like, from
+  the music files on the phone, your Navidrome (plays, stars, ratings and what
+  you own), Last.fm and ListenBrainz. New music is found through Deezer's and
+  Apple Music's catalogues and YouTube Music's radio. Long-press a suggestion
+  for “More like this”, “Not interested” or “Never this artist”; a slider sets
+  how familiar or new the mixes are; genres can be left out. New releases can
+  notify you as they come out or in a weekly summary. Mixes can be saved as
+  playlists that update themselves every day.
+- **Navidrome.** Connect your server and its songs play in mixes straight from
+  it; “Download to Navidrome” puts downloads into its music folder (over your
+  saved SFTP/FTP server) and asks it to rescan.
+- **Block artists.** Their songs, and every song they're featured on, are
+  hidden everywhere (search, albums, playlists, library, suggestions) and
+  skipped if they come up in the queue.
+
 ## Where the audio comes from
 
 KultrDL uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) (through
@@ -104,7 +123,7 @@ Requirements: JDK 17 or newer and the Android SDK (compile SDK 37).
 
 ```sh
 ./gradlew :app:assembleDebug        # app/build/outputs/apk/debug/
-./gradlew :core:test                # catalogue, link, matching and FTP/SFTP tests
+./gradlew :core:test                # catalogue, links, matching, recommendations, FTP/SFTP
 ./gradlew :app:assembleRelease      # signed, R8-shrunk APKs
 ```
 
@@ -134,7 +153,7 @@ first (Settings → Backup and reset).
 
 | Module | What it holds |
 | --- | --- |
-| `core` | Plain Kotlin, no Android: the catalogue clients (YouTube Music and YouTube search, the iTunes Search API, Deezer's API, Spotify's embed pages and Web API, Bandcamp, song.link, page metadata), link recognition, reading yt-dlp's JSON, the matcher that finds a catalogue track's recording, and FTP/FTPS (Apache Commons Net) and SFTP (JSch with Bouncy Castle) uploads. Unit-tested on the JVM, the transfers against real SSH and FTP servers. |
+| `core` | Plain Kotlin, no Android: the recommendation engine (taste profile, ranking, mixes, artist blocking), the Navidrome (Subsonic), Last.fm and ListenBrainz clients, the catalogue clients (YouTube Music and YouTube search, the iTunes Search API, Deezer's API, Spotify's embed pages and Web API, Bandcamp, song.link, page metadata), link recognition, reading yt-dlp's JSON, the matcher that finds a catalogue track's recording, and FTP/FTPS (Apache Commons Net) and SFTP (JSch with Bouncy Castle) uploads. Unit-tested on the JVM, the transfers against real SSH and FTP servers. |
 | `app` | The Android app: Room for the library and download queue, yt-dlp and ffmpeg through youtubedl-android, a WorkManager download worker, tagging with jaudiotagger, a Media3 playback service that resolves each queue entry to a downloaded file or a stream as it plays, and the Jetpack Compose interface with Kultr's liquid glass. |
 
 ## License
