@@ -19,6 +19,10 @@ data class BackupFile(
     val playlists: List<BackupPlaylist> = emptyList(),
     /** Saved servers, without passwords or keys. */
     val servers: List<SavedServer> = emptyList(),
+    /** Blocked artists and answers to suggestions. */
+    val taste: TasteData? = null,
+    /** The Navidrome connection, without its password. */
+    val navidrome: NavidromeConfig? = null,
 ) {
     fun encode(): String = LenientJson.encodeToString(serializer(), this)
 

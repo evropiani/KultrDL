@@ -103,7 +103,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @Composable
-private fun PageHeader(title: String, action: (@Composable () -> Unit)? = null) {
+internal fun PageHeader(title: String, action: (@Composable () -> Unit)? = null) {
     val actions = LocalActions.current
     Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = { actions.back() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back", tint = Kultr.colors.ink) }

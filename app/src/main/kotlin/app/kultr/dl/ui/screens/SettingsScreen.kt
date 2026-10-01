@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -105,6 +106,7 @@ fun SettingsScreen() {
             }
         }
         section("Downloads", Icons.Rounded.Download) { DownloadSettings(settings, ::update) }
+        section("Recommendations", Icons.Rounded.AutoAwesome) { RecommendationSettings(settings, ::update) }
         section("Search and sources", Icons.Rounded.Search) { SourceSettings(settings, ::update) }
         section("Playback", Icons.Rounded.PlayCircle) { PlaybackSettings(settings, ::update) }
         section("Appearance", Icons.Rounded.Palette) { AppearanceSettings(settings, ::update) }
@@ -130,12 +132,12 @@ private fun Section(title: String, icon: ImageVector, expanded: Boolean, onToggl
 }
 
 @Composable
-private fun Toggle(label: String, checked: Boolean, hint: String? = null, onChange: (Boolean) -> Unit) {
+internal fun Toggle(label: String, checked: Boolean, hint: String? = null, onChange: (Boolean) -> Unit) {
     SettingRow(label, hint = hint, onClick = { onChange(!checked) }) { Switch(checked = checked, onCheckedChange = onChange) }
 }
 
 @Composable
-private fun <T> Choice(label: String, options: List<Pair<T, String>>, selected: T, hint: String? = null, onSelect: (T) -> Unit) {
+internal fun <T> Choice(label: String, options: List<Pair<T, String>>, selected: T, hint: String? = null, onSelect: (T) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(label, style = MaterialTheme.typography.bodyLarge, color = Kultr.colors.ink)
         if (hint != null) Text(hint, style = MaterialTheme.typography.bodySmall, color = Kultr.colors.ink3)
@@ -358,8 +360,12 @@ private fun BackupSettings(s: Settings) {
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri ?: return@rememberLauncherForActivityResult
         actions.launch {
-            val file = graph.library.snapshot(s.copy(spotifyClientSecret = ""))
-                .copy(servers = graph.servers.servers.value.map { it.withoutSecrets() })
+            val file = graph.library.snapshot(s.copy(spotifyClientSecret = "", lastFmApiKey = ""))
+                .copy(
+                    servers = graph.servers.servers.value.map { it.withoutSecrets() },
+                    taste = graph.taste.data.value,
+                    navidrome = graph.navidrome.config.value.takeIf { it.configured }?.withoutSecrets(),
+                )
             withContext(Dispatchers.IO) {
                 context.contentResolver.openOutputStream(uri)?.use { it.write(file.encode().toByteArray()) }
             }
@@ -374,7 +380,11 @@ private fun BackupSettings(s: Settings) {
             val file = BackupFile.decode(text)
             val count = graph.library.restore(file)
             val servers = graph.servers.restore(file.servers)
-            file.settings?.let { restored -> graph.settings.update { restored.copy(spotifyClientSecret = it.spotifyClientSecret) } }
+            file.taste?.let(graph.taste::restore)
+            file.navidrome?.let { nav -> if (!graph.navidrome.config.value.configured) graph.navidrome.update { nav.copy(lastSyncAt = 0) } }
+            file.settings?.let { restored ->
+                graph.settings.update { restored.copy(spotifyClientSecret = it.spotifyClientSecret, lastFmApiKey = it.lastFmApiKey) }
+            }
             graph.messages.show(
                 "Restored $count tracks and ${file.playlists.size} playlists" +
                     if (servers > 0) "; enter the passwords for ${Format.count(servers, "server")} again" else "",

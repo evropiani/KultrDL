@@ -1,6 +1,7 @@
 package app.kultr.dl.engine
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -405,6 +406,8 @@ class Recommender(
         }
     }
 
+    // The POST_NOTIFICATIONS check is just below; lint can't see it through the early return.
+    @SuppressLint("MissingPermission")
     private fun notify(items: List<Alert>) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
