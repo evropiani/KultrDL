@@ -35,7 +35,7 @@ class LiveSourcesTest {
     fun onlyWhenAsked() = assumeTrue("set LIVE_SOURCES=1 to run", System.getenv("LIVE_SOURCES") == "1")
 
     @Test
-    fun deezerAndApple() = runBlocking {
+    fun deezerAndApple(): Unit = runBlocking {
         val artist = deezer.searchArtists("Daft Punk").maxBy { it.fans }
         println("Deezer artist: $artist")
         val albums = deezer.artistAlbums(artist.id.removePrefix("deezer:"), artist.name)
@@ -52,22 +52,23 @@ class LiveSourcesTest {
     }
 
     @Test
-    fun youTubeMusicRadio() = runBlocking {
+    fun youTubeMusicRadio(): Unit = runBlocking {
         val result = runCatching { YouTubeMusic(http).radio("u7K72X4eo_s") }
         println("YouTube Music radio: ${result.getOrNull()?.take(8)?.map { "${it.artist} – ${it.title}" } ?: result.exceptionOrNull()}")
     }
 
     @Test
-    fun listenBrainz() = runBlocking {
+    fun listenBrainz(): Unit = runBlocking {
         val lb = ListenBrainz(http)
         println("ListenBrainz top artists of rob: ${runCatching { lb.topArtists("rob").take(5) }.getOrElse { it.toString() }}")
         val playlists = runCatching { lb.createdFor("rob") }.getOrElse { println("createdFor: $it"); emptyList() }
         println("ListenBrainz playlists: ${playlists.take(4).map { it.title }}")
         playlists.firstOrNull()?.let { println("First playlist: ${lb.playlist(it.id).take(5).map { t -> "${t.artist} – ${t.title}" }}") }
+        Unit
     }
 
     @Test
-    fun aWholeFeed() = runBlocking {
+    fun aWholeFeed(): Unit = runBlocking {
         val now = System.currentTimeMillis()
         val day = 86_400_000L
         val played = listOf("Daft Punk" to "One More Time", "Massive Attack" to "Teardrop", "Air" to "Sexy Boy", "Portishead" to "Glory Box")
