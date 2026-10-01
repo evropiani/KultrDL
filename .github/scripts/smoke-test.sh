@@ -27,13 +27,17 @@ dump_ui() {
 }
 # What the screen says, one text per line.
 screen_text() { dump_ui && grep -o 'text="[^"]\+"' "$OUT/ui.xml" | sed 's/^text="//; s/"$//' ; }
+# The bounds ("left top right bottom") of the first on-screen node whose attribute $1 is exactly $2,
+# skipping nodes whose middle is at or below y=$TAP_ABOVE (see tap_scrolling).
+find_node() {
+  grep -o "$1=\"$2\"[^>]*bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" "$OUT/ui.xml" \
+    | grep -o 'bounds="[^"]*"' | grep -o '[0-9]\+' | paste - - - - \
+    | awk -v max="${TAP_ABOVE:-100000}" '($2 + $4) / 2 < max { print; exit }'
+}
 # Tap the middle of the first on-screen node whose text is exactly $1.
 tap_text() {
   dump_ui || return 1
-  local nums
-  nums=$(grep -o "text=\"$1\"[^>]*bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" "$OUT/ui.xml" | head -1 \
-    | grep -o 'bounds="[^"]*"' | grep -o '[0-9]\+' | tr '\n' ' ')
-  set -- $nums
+  set -- $(find_node text "$1")
   [ $# -ge 4 ] || return 1
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
 }
@@ -41,10 +45,7 @@ crashed() { log_has "FATAL EXCEPTION|ANR in $PKG"; }
 # Tap the first on-screen node whose attribute $1 (content-desc, or resource-id for a Compose test tag) is exactly $2.
 tap_attr() {
   dump_ui || return 1
-  local nums
-  nums=$(grep -o "$1=\"$2\"[^>]*bounds=\"\[[0-9]*,[0-9]*\]\[[0-9]*,[0-9]*\]\"" "$OUT/ui.xml" | head -1 \
-    | grep -o 'bounds="[^"]*"' | grep -o '[0-9]\+' | tr '\n' ' ')
-  set -- $nums
+  set -- $(find_node "$1" "$2")
   [ $# -ge 4 ] || return 1
   echo "      tap $(( ($1 + $3) / 2 )),$(( ($2 + $4) / 2 )) on [$1,$2][$3,$4]"
   adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
@@ -61,8 +62,13 @@ no_soft_keyboard() {
 # Scroll the page down.
 # (On this small screen the page's own buttons, the mini player and the tab bar take the bottom half.)
 swipe_up() { adb shell input swipe $((W / 2)) $((H * 45 / 100)) $((W / 2)) $((H * 15 / 100)) 500; sleep 1; }
-# Run a tap command, scrolling the page down until it finds its target.
-tap_scrolling() { for _ in 1 2 3 4 5 6; do "$@" && return 0; swipe_up; done; return 1; }
+# Run a tap command, scrolling the page down until it finds its target. The mini player and the
+# tab bar float over the bottom of the page, so a target down there is scrolled up first: a tap on
+# it would land on them. (The last try takes it wherever it is, for a page too short to scroll.)
+tap_scrolling() {
+  for _ in 1 2 3 4 5 6; do TAP_ABOVE=$((H * 75 / 100)) "$@" && return 0; swipe_up; done
+  "$@"
+}
 type_into() { tap_scrolling tap_attr resource-id "$1" || return 1; sleep 1; adb shell input text "$2"; sleep 1; hide_keyboard; }
 # Open a tab of the floating bar. While a search is open the bar shows a back button
 # instead of the tabs, so go back (and bring the app forward again) until they show.

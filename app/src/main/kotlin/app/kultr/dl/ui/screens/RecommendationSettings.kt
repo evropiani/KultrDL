@@ -132,9 +132,8 @@ fun RecommendationSettings(s: Settings, update: ((Settings) -> Settings) -> Unit
         if (!v) {
             update { it.copy(usePhoneMusic = false) }
             actions.launch { graph.recommender.forgetPhone() }
-        } else if (graph.phone.hasPermission()) {
-            askAudio.launch(graph.phone.permission)
         } else {
+            // Already granted, this comes straight back as granted and scans.
             askAudio.launch(graph.phone.permission)
         }
     }
