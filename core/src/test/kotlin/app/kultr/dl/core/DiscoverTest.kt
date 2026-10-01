@@ -26,7 +26,10 @@ import org.junit.Test
 class CreditsTest {
     @Test
     fun findsEveryoneOnATrack() {
-        assertEquals(listOf("Drake", "Future"), Credits.people("Drake & Future", "Life Is Good"))
+        assertEquals(listOf("Drake", "Future", "Drake & Future"), Credits.people("Drake & Future", "Life Is Good"))
+        assertEquals(listOf("Mumford", "Sons", "Mumford & Sons"), Credits.people("Mumford & Sons", "The Cave"))
+        assertEquals(listOf("AC/DC"), Credits.people("AC/DC", "Back in Black"))
+        assertEquals(listOf("Burial", "Four Tet", "Burial / Four Tet"), Credits.people("Burial / Four Tet", "Moth"))
         assertEquals(listOf("Rihanna", "Drake"), Credits.people("Rihanna", "Work (feat. Drake)"))
         assertEquals(listOf("A", "B", "C"), Credits.people("A", "Song ft. B & C"))
         assertEquals(listOf("A", "B"), Credits.people("A", "Song [with B]"))
@@ -83,6 +86,24 @@ class TasteTest {
         assertEquals(0.5, profile.score("Tricky"), 0.01)
         assertEquals(listOf("Trip Hop"), profile.get("Portishead feat. Beth")!!.genres)
         assertEquals("Rap/Hip-Hop", Taste.genreName("rap / hip hop"))
+    }
+
+    @Test
+    fun suggestionsGrowFromArtistsCreditedOnTheirOwn() {
+        val now = 1_750_000_000_000L
+        val profile = Taste.build(
+            listOf(
+                Signal("Mumford & Sons", "The Cave", 3.0, now),
+                Signal("AC/DC", "Back in Black", 2.0, now),
+                Signal("Daft Punk", "One More Time", 1.0, now),
+                Signal("Daft Punk & Pharrell Williams", "Get Lucky", 1.0, now),
+            ),
+            now,
+        )
+        // "Sons" and "Pharrell Williams" still count (they're known), but only as part of a credit.
+        assertTrue(profile.score("Sons") > 0)
+        assertEquals(listOf("Mumford & Sons", "AC/DC", "Daft Punk", "Daft Punk & Pharrell Williams"), profile.seeds(10).map { it.name })
+        assertEquals(null, profile.get("AC"))
     }
 }
 

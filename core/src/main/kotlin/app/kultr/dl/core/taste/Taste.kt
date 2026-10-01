@@ -16,7 +16,11 @@ data class Signal(
     val genre: String? = null,
 )
 
-data class ArtistScore(val key: String, val name: String, val score: Double, val genres: List<String>)
+/**
+ * [solo]: credited on their own somewhere, not only as part of a shared
+ * credit ("Sons" in "Mumford & Sons") or as a feature.
+ */
+data class ArtistScore(val key: String, val name: String, val score: Double, val genres: List<String>, val solo: Boolean = true)
 
 /** Artists (and genres) by how much the user likes them now. */
 class TasteProfile(val artists: List<ArtistScore>, val genres: Map<String, Double>) {
@@ -32,6 +36,9 @@ class TasteProfile(val artists: List<ArtistScore>, val genres: Map<String, Doubl
     fun get(name: String): ArtistScore? = byKey[Credits.key(name)]
 
     fun top(n: Int): List<ArtistScore> = artists.filter { it.score > 0 }.take(n)
+
+    /** The artists to build suggestions from: liked, and credited on their own somewhere. */
+    fun seeds(n: Int): List<ArtistScore> = artists.filter { it.score > 0 && it.solo }.take(n)
 
     companion object {
         const val KNOWN = 1.5
@@ -59,6 +66,7 @@ object Taste {
         val names = HashMap<String, MutableMap<String, Double>>()
         val genres = HashMap<String, MutableMap<String, Double>>()
         val allGenres = HashMap<String, Double>()
+        val solo = HashSet<String>()
 
         fun add(name: String, w: Double, genre: String?) {
             val key = Credits.key(name)
@@ -74,6 +82,7 @@ object Taste {
             val genre = s.genre?.trim()?.takeIf { it.isNotEmpty() }?.let(::genreName)
             val whole = s.artist.trim()
             add(whole, w, genre)
+            solo += Credits.key(whole)
             val parts = Text.splitArtists(whole)
             if (parts.size > 1) parts.forEach { add(it, w * 0.5, genre) }
             Credits.featured(s.title).forEach { add(it, w * 0.5, null) }
@@ -86,6 +95,7 @@ object Taste {
                 name = names[key]?.maxByOrNull { it.value }?.key ?: key,
                 score = score,
                 genres = genres[key].orEmpty().entries.sortedByDescending { it.value }.map { it.key }.take(3),
+                solo = key in solo,
             )
         }.sortedByDescending { it.score }
         return TasteProfile(artists, allGenres)

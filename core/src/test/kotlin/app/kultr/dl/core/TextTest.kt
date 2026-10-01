@@ -34,6 +34,8 @@ class TextTest {
         assertTrue(Text.similarity("Paper Boats", "paper boats") == 1.0)
         assertTrue(Text.similarity("Paper Boats", "Glass Houses") < 0.4)
         assertEquals(listOf("A", "B", "C"), Text.splitArtists("A, B & C"))
+        assertEquals(listOf("AC/DC"), Text.splitArtists("AC/DC"))
+        assertEquals(listOf("A", "B"), Text.splitArtists("A / B"))
         assertEquals("A_B", Text.fileName("A/B"))
     }
 }

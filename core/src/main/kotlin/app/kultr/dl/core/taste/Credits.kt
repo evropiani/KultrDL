@@ -38,9 +38,13 @@ object Credits {
     fun keys(artist: String, title: String, albumArtist: String? = null): Set<String> =
         everyone(artist, title, albumArtist).map(::key).filter { it.isNotEmpty() }.toSet()
 
-    /** The people to offer in "Block artist…": each credited artist once, whole credit lines left out. */
+    /**
+     * The names to offer in "Block artist…": each credited artist once, then a
+     * shared credit line as a whole, since that may be one band ("Mumford & Sons").
+     */
     fun people(artist: String, title: String): List<String> {
-        val parts = Text.splitArtists(artist).ifEmpty { listOf(artist) } + featured(title)
+        val split = Text.splitArtists(artist)
+        val parts = split.ifEmpty { listOf(artist) } + featured(title) + (if (split.size > 1) listOf(artist) else emptyList())
         return parts.map { it.trim() }.filter { key(it).isNotEmpty() }.distinctBy { key(it) }
     }
 }

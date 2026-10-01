@@ -63,9 +63,12 @@ object Text {
         return 2.0 * hits / (pa.size + pairs(b).size)
     }
 
-    /** Artist credits split on the usual separators: "A, B & C feat. D". */
+    /**
+     * Artist credits split on the usual separators: "A, B & C feat. D", "A / B".
+     * A slash needs a space next to it, so "AC/DC" stays one artist.
+     */
     fun splitArtists(artist: String): List<String> =
-        artist.split(Regex("(?i)\\s*(,|&|\\bx\\b|\\band\\b|\\bfeat\\.?|\\bft\\.?|\\bfeaturing\\b|/|;)\\s*"))
+        artist.split(Regex("(?i)\\s*(,|&|\\bx\\b|\\band\\b|\\bfeat\\.?|\\bft\\.?|\\bfeaturing\\b|(?<=\\s)/|/(?=\\s)|;)\\s*"))
             .map { it.trim() }
             .filter { it.isNotEmpty() }
 

@@ -116,7 +116,7 @@ class Discovery(
         successes.set(0)
 
         val base = input.rules
-        val seeds = input.profile.top(input.seedCount * 2).filter { base.allowsArtist(it.name) }.take(input.seedCount)
+        val seeds = input.profile.seeds(input.seedCount * 2).filter { base.allowsArtist(it.name) }.take(input.seedCount)
         log("Seeds: ${seeds.take(10).joinToString { it.name }}${if (seeds.size > 10) " and ${seeds.size - 10} more" else ""}")
 
         // Who each seed artist is in the catalogue.
