@@ -18,7 +18,9 @@ import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.BookmarkAdd
+import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.BookmarkRemove
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
@@ -58,6 +60,7 @@ import app.kultr.dl.core.model.Track
 import app.kultr.dl.core.util.Format
 import app.kultr.dl.data.db.DownloadState
 import app.kultr.dl.ui.LocalActions
+import app.kultr.dl.ui.LocalBlocks
 import app.kultr.dl.ui.LocalDownloadBadges
 import app.kultr.dl.ui.LocalTrackFlags
 import app.kultr.dl.ui.theme.Kultr
@@ -189,6 +192,9 @@ fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit, extraActio
         HorizontalDivider()
         MenuItem("Download", Icons.Rounded.Download, onDismiss) { actions.download(listOf(track)) }
         MenuItem("Download as…", Icons.Rounded.Tune, onDismiss) { actions.downloadAs(listOf(track)) }
+        if (actions.canDownloadToNavidrome() && track.source != app.kultr.dl.core.model.Source.NAVIDROME) {
+            MenuItem("Download to Navidrome", Icons.Rounded.CloudDownload, onDismiss) { actions.downloadToNavidrome(listOf(track)) }
+        }
         if (flags?.localUri != null) {
             if (servers.isNotEmpty()) {
                 MenuItem("Send to server…", Icons.Rounded.CloudUpload, onDismiss) { actions.sendToServer(listOf(track)) }
@@ -198,6 +204,7 @@ fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit, extraActio
         if (track.needsMatch) {
             MenuItem("Find another recording", Icons.Rounded.Refresh, onDismiss) { actions.rematch(track) }
         }
+        MenuItem("Block artist…", Icons.Rounded.Block, onDismiss) { actions.blockArtist(track) }
         HorizontalDivider()
         if (track.pageUrl != null) {
             MenuItem("Open on ${track.source.label}", Icons.AutoMirrored.Rounded.OpenInNew, onDismiss) { actions.openInBrowser(track.pageUrl) }
@@ -233,6 +240,8 @@ fun LazyListScope.trackItems(
     extraActions: (Int, Track) -> List<MenuAction> = { _, _ -> emptyList() },
 ) {
     itemsIndexed(tracks, key = { index, t -> "$keyPrefix:$index:${t.id}" }) { index, track ->
+        // Songs by blocked artists keep their place (for playlist positions) but aren't shown; play skips them.
+        if (LocalBlocks.current.blocks(track)) return@itemsIndexed
         TrackRow(
             track = track,
             onClick = { onPlay(index) },

@@ -69,6 +69,9 @@ interface TrackDao {
 
     @Query("SELECT * FROM tracks WHERE favorite = 1 OR saved = 1 OR localUri IS NOT NULL OR id IN (SELECT trackId FROM playlist_tracks)")
     suspend fun keepers(): List<TrackEntity>
+
+    @Query("SELECT * FROM tracks WHERE playCount > 0 OR favorite = 1 OR saved = 1 OR localUri IS NOT NULL")
+    suspend fun known(): List<TrackEntity>
 }
 
 @Dao
@@ -157,6 +160,39 @@ interface DownloadDao {
 
     @Query("UPDATE downloads SET state = 'QUEUED', progress = 0, message = NULL, updatedAt = :at WHERE state = 'FAILED'")
     suspend fun retryFailed(at: Long = System.currentTimeMillis())
+}
+
+@Dao
+interface PlayDao {
+    @Insert
+    suspend fun insert(play: PlayEntity)
+
+    @Query("SELECT * FROM plays WHERE startedAt >= :since ORDER BY startedAt")
+    suspend fun since(since: Long): List<PlayEntity>
+
+    @Query("DELETE FROM plays WHERE startedAt < :before")
+    suspend fun prune(before: Long)
+
+    @Query("DELETE FROM plays")
+    suspend fun clear()
+}
+
+@Dao
+interface OwnedSongDao {
+    @Query("SELECT * FROM owned_songs")
+    suspend fun all(): List<OwnedSongEntity>
+
+    @Query("SELECT * FROM owned_songs WHERE id = :id")
+    suspend fun get(id: String): OwnedSongEntity?
+
+    @Query("SELECT COUNT(*) FROM owned_songs WHERE owner = :owner")
+    fun count(owner: String): Flow<Int>
+
+    @Query("DELETE FROM owned_songs WHERE owner = :owner")
+    suspend fun clear(owner: String)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(songs: List<OwnedSongEntity>)
 }
 
 @Dao

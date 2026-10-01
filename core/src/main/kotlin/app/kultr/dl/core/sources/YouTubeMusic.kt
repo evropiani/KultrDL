@@ -41,6 +41,19 @@ class YouTubeMusic(private val http: Http) {
 
     suspend fun album(browseId: String): Collection? = parseAlbumPage(browseId, browse(browseId))
 
+    /** The radio YouTube Music plays after [videoId]: songs like it, from it and from similar artists. */
+    suspend fun radio(videoId: String): List<Track> {
+        val body = buildJsonObject {
+            putJsonObject("context") { putJsonObject("client") { client() } }
+            put("videoId", videoId)
+            put("playlistId", "RDAMVM$videoId")
+            put("isAudioOnly", true)
+            put("enablePersistentPlaylistPanel", true)
+        }
+        val json = parseJson(http.postJson("$BASE/youtubei/v1/next?prettyPrint=false", body.toString(), HEADERS))
+        return parseRadio(json).filter { it.id != "yt:$videoId" }
+    }
+
     private suspend fun search(query: String, filter: Filter): JsonElement {
         val body = buildJsonObject {
             putJsonObject("context") { putJsonObject("client") { client() } }
@@ -154,6 +167,32 @@ class YouTubeMusic(private val http: Http) {
                 year = album?.year,
             )
         }
+
+        /** The queue of a "next" (radio) answer. */
+        fun parseRadio(root: JsonElement): List<Track> = root.objectsUnder("playlistPanelVideoRenderer").mapNotNull { r ->
+            val videoId = r.at("videoId").str ?: r.at("navigationEndpoint").at("watchEndpoint").at("videoId").str ?: return@mapNotNull null
+            val title = text(runs(r.at("title"))).ifEmpty { return@mapNotNull null }
+            val byline = runs(r.at("longBylineText")).ifEmpty { runs(r.at("shortBylineText")) }
+            val artistRuns = byline.filter { run -> pageType(run)?.let { "ARTIST" in it || "USER_CHANNEL" in it } == true }
+            val parts = segments(byline).map { text(it) }
+            val artist = if (artistRuns.isNotEmpty()) artistRuns.joinToString(", ") { it.at("text").str.orEmpty() } else parts.firstOrNull()
+            val album = byline.firstOrNull { pageType(it)?.contains("ALBUM") == true }?.at("text").str
+            Track(
+                id = "yt:$videoId",
+                source = Source.YOUTUBE_MUSIC,
+                title = title,
+                artist = artist?.removeSuffix(" - Topic") ?: "Unknown artist",
+                album = album,
+                durationMs = Text.parseClock(text(runs(r.at("lengthText")))),
+                artworkUrl = bigThumbnail(thumbnail(r)),
+                pageUrl = watchUrl(videoId),
+                streamUrl = watchUrl(videoId),
+                year = parts.firstNotNullOfOrNull { p -> p.takeIf { it.length == 4 && it.all(Char::isDigit) }?.toInt() },
+            )
+        }.distinctBy { it.id }.toList()
+
+        /** The video id in a YouTube or YouTube Music watch link. */
+        fun videoId(url: String?): String? = url?.let { Regex("[?&]v=([A-Za-z0-9_-]{11})").find(it)?.groupValues?.get(1) }
 
         fun parseCollections(root: JsonElement): List<Collection> =
             root.objectsUnder("musicResponsiveListItemRenderer").mapNotNull { row ->

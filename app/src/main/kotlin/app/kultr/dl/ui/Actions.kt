@@ -34,6 +34,8 @@ object Routes {
     const val SERVERS = "servers"
     const val SERVER = "server/{id}"
     const val NEW = "new"
+    const val NAVIDROME = "navidrome"
+    const val BLOCKED = "blocked"
 
     fun library(tab: String? = null) = if (tab == null) "library" else "library?tab=$tab"
     fun server(id: String) = "server/" + Uri.encode(id)
@@ -57,6 +59,8 @@ class Dialogs {
     var addToPlaylist by mutableStateOf<List<Track>?>(null)
     var downloadAs by mutableStateOf<List<Track>?>(null)
     var sendTo by mutableStateOf<List<Track>?>(null)
+    /** "Block artist…" for this track: who to block among its credits. */
+    var block by mutableStateOf<Track?>(null)
 }
 
 /** What a download row in the queue looks like to a track list. */
@@ -64,6 +68,8 @@ data class DownloadBadge(val state: DownloadState, val progress: Float)
 
 val LocalTrackFlags = staticCompositionLocalOf<Map<String, TrackFlags>> { emptyMap() }
 val LocalDownloadBadges = staticCompositionLocalOf<Map<String, DownloadBadge>> { emptyMap() }
+/** Blocked artists: their songs, and songs they are on, are left out of every list. */
+val LocalBlocks = staticCompositionLocalOf { app.kultr.dl.core.taste.ArtistBlocks.NONE }
 val LocalActions = staticCompositionLocalOf<AppActions> { error("No actions") }
 
 /** Everything a screen can ask the app to do. */
@@ -90,17 +96,36 @@ class AppActions(
         }
     }
 
-    fun play(tracks: List<Track>, index: Int = 0) = graph.player.play(tracks, index)
+    /** Songs by blocked artists (or with them on) never reach the player. */
+    private fun allowed(tracks: List<Track>): List<Track> {
+        val kept = graph.taste.blocks.value.tracks(tracks)
+        if (kept.isEmpty() && tracks.isNotEmpty()) messages.show("All of these are by artists you blocked.")
+        return kept
+    }
 
-    fun shuffle(tracks: List<Track>) = graph.player.play(tracks, 0, shuffle = true)
+    fun play(tracks: List<Track>, index: Int = 0) {
+        val start = tracks.getOrNull(index)
+        val kept = allowed(tracks)
+        if (kept.isEmpty()) return
+        graph.player.play(kept, start?.let { s -> kept.indexOfFirst { it.id == s.id }.takeIf { it >= 0 } } ?: 0)
+    }
+
+    fun shuffle(tracks: List<Track>) {
+        val kept = allowed(tracks)
+        if (kept.isNotEmpty()) graph.player.play(kept, 0, shuffle = true)
+    }
 
     fun playNext(tracks: List<Track>) {
-        graph.player.playNext(tracks)
+        val kept = allowed(tracks)
+        if (kept.isEmpty()) return
+        graph.player.playNext(kept)
         messages.show(if (tracks.size == 1) "“${tracks[0].title}” plays next" else "${tracks.size} tracks play next")
     }
 
     fun enqueue(tracks: List<Track>) {
-        graph.player.enqueue(tracks)
+        val kept = allowed(tracks)
+        if (kept.isEmpty()) return
+        graph.player.enqueue(kept)
         messages.show(if (tracks.size == 1) "Added “${tracks[0].title}” to the queue" else "Added ${tracks.size} tracks to the queue")
     }
 
@@ -144,6 +169,12 @@ class AppActions(
     }
 
     fun download(tracks: List<Track>, preset: DownloadPreset, destination: Destination? = graph.settings.settings.value.destination) {
+        val wanted = allowed(tracks).filterNot { it.source == app.kultr.dl.core.model.Source.PHONE }
+        if (wanted.isEmpty()) {
+            if (tracks.isNotEmpty() && tracks.all { it.source == app.kultr.dl.core.model.Source.PHONE }) messages.show("That's already on this phone.")
+            return
+        }
+        @Suppress("NAME_SHADOWING") val tracks = wanted
         val server = destination?.let { graph.servers.get(it.serverId) }
         val onPhone = destination == null || server == null || destination.keepOnPhone
         if (onPhone && graph.saver.needsPermission(graph.settings.settings.value.saveToMusic)) askStoragePermission()
@@ -152,6 +183,66 @@ class AppActions(
             val what = if (tracks.size == 1) "“${tracks[0].title}”" else "${tracks.size} tracks"
             messages.show("Downloading $what · ${preset.label}" + (server?.let { " → ${it.name}" } ?: ""))
         }
+    }
+
+    /** Download straight into Navidrome's music folder (set in Settings → Recommendations → Navidrome). */
+    fun downloadToNavidrome(tracks: List<Track>) {
+        val target = graph.navidrome.config.value.destination
+        if (target == null || graph.servers.get(target.serverId) == null) {
+            messages.show("Choose Navidrome's music folder first.")
+            navigate(Routes.NAVIDROME)
+            return
+        }
+        download(tracks, graph.settings.settings.value.download, target.copy(keepOnPhone = false))
+    }
+
+    fun canDownloadToNavidrome(): Boolean = graph.navidrome.config.value.destination?.let { graph.servers.get(it.serverId) } != null
+
+    // ------------------------------------------------------------ taste --
+
+    fun blockArtist(track: Track) {
+        val people = app.kultr.dl.core.taste.Credits.people(track.artist, track.title)
+        if (people.size <= 1) block(people.ifEmpty { listOf(track.artist) }) else dialogs.block = track
+    }
+
+    fun block(names: List<String>) {
+        if (names.isEmpty()) return
+        graph.taste.block(names)
+        messages.show(
+            (if (names.size == 1) "Blocked ${names[0]}" else "Blocked ${names.joinToString()}") +
+                ". Their songs, and songs they're on, are hidden and skipped.",
+            MessageKind.SUCCESS,
+            long = true,
+        )
+    }
+
+    fun unblock(name: String) {
+        graph.taste.unblock(name)
+        messages.show("Unblocked $name")
+    }
+
+    /** "More like this" on a suggestion. */
+    fun like(key: String, artist: String, label: String) {
+        graph.taste.like(key, artist, label)
+        messages.show("More like $artist from now on", MessageKind.SUCCESS)
+    }
+
+    /** "Not interested": hidden now, and a little less of this artist. */
+    fun dismiss(key: String, artist: String, label: String) {
+        graph.taste.dismiss(key, artist, label)
+        messages.show("Got it — you won't see “$label” again")
+    }
+
+    /** Save a mix as a playlist that gets the mix's new songs each day. */
+    fun followMix(mix: app.kultr.dl.core.discover.Mix) = launch {
+        val url = app.kultr.dl.engine.Recommender.MIX_URL + mix.id
+        val existing = graph.library.playlistsWithTracks().keys.firstOrNull { it.sourceUrl == url }
+        if (existing != null) {
+            messages.show("“${existing.name}” is already in your playlists, updated daily")
+            return@launch
+        }
+        graph.library.createPlaylist(mix.title, mix.tracks, sourceUrl = url, artworkUrl = mix.artworkUrls.firstOrNull())
+        messages.show("“${mix.title}” saved to your playlists; it gets new songs every day", MessageKind.SUCCESS)
     }
 
     /** Asks which server folder, then sends tracks that are on the phone there. */

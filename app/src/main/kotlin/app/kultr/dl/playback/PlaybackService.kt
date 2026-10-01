@@ -21,6 +21,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import app.kultr.dl.KultrDLApp
 import app.kultr.dl.MainActivity
+import app.kultr.dl.data.db.PlayEntity
 import app.kultr.dl.data.describe
 import app.kultr.dl.engine.HlsConcatDataSource
 import app.kultr.dl.engine.RoutingDataSource
@@ -107,9 +108,55 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
+    /** How the song now loaded is being listened to, for the listening log. */
+    private class Listen(val id: String, val artist: String, val title: String, val startedAt: Long) {
+        var listenedMs = 0L
+        var playingSince = 0L
+        var durationMs: Long? = null
+    }
+
+    private var listen: Listen? = null
+
+    /** Log the song that was loaded: how long it played, and whether it was finished or skipped. */
+    private fun endListen(reason: Int?) {
+        val l = listen ?: return
+        listen = null
+        val now = System.currentTimeMillis()
+        if (l.playingSince > 0) l.listenedMs += now - l.playingSince
+        val duration = l.durationMs
+        val completed = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT ||
+            (duration != null && l.listenedMs >= duration * 0.8)
+        val skipped = !completed && reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK &&
+            l.listenedMs < minOf(30_000L, (duration ?: 60_000L) / 2)
+        if (!skipped && l.listenedMs < 3_000) return
+        val play = PlayEntity(
+            trackId = l.id,
+            artist = l.artist,
+            title = l.title,
+            startedAt = l.startedAt,
+            listenedMs = l.listenedMs,
+            durationMs = duration,
+            completed = completed,
+            skipped = skipped,
+        )
+        scope.launch { runCatching { KultrDLApp.graph.library.recordPlay(play) } }
+    }
+
     private inner class Listener(private val player: ExoPlayer) : Player.Listener {
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val graph = KultrDLApp.graph
+            endListen(reason)
+            val meta = mediaItem?.mediaMetadata
+            // Songs by blocked artists (or with them on) are passed over, wherever they came from.
+            if (mediaItem != null && graph.taste.blocks.value.blocks(meta?.artist?.toString().orEmpty(), meta?.title?.toString().orEmpty())) {
+                Log.i(TAG, "Skipping ${mediaItem.mediaId}: blocked artist")
+                if (player.hasNextMediaItem()) player.seekToNextMediaItem() else player.pause()
+                return
+            }
+            mediaItem?.let {
+                listen = Listen(it.mediaId, meta?.artist?.toString().orEmpty(), meta?.title?.toString().orEmpty(), System.currentTimeMillis())
+                    .apply { if (player.isPlaying) playingSince = System.currentTimeMillis() }
+            }
             mediaItem?.mediaId?.let { id -> scope.launch { runCatching { graph.library.markPlayed(id) } } }
             // Have the next track's stream ready before it is needed.
             val next = player.nextMediaItemIndex
@@ -150,7 +197,21 @@ class PlaybackService : MediaSessionService() {
             }
         }
 
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY) player.duration.takeIf { it > 0 }?.let { listen?.durationMs = it }
+            if (playbackState == Player.STATE_ENDED) endListen(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            listen?.let { l ->
+                val now = System.currentTimeMillis()
+                if (isPlaying) {
+                    if (l.playingSince == 0L) l.playingSince = now
+                } else if (l.playingSince > 0) {
+                    l.listenedMs += now - l.playingSince
+                    l.playingSince = 0
+                }
+            }
             if (isPlaying) {
                 player.currentMediaItem?.let { item ->
                     retried.remove(item.mediaId)
@@ -173,6 +234,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        endListen(null)
         session?.run {
             player.release()
             release()

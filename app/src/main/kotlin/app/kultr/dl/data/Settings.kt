@@ -19,6 +19,9 @@ enum class ThemeMode(val label: String) { SYSTEM("System"), DARK("Dark"), LIGHT(
 enum class StreamQuality(val label: String) { HIGH("Best"), SAVER("Data saver") }
 
 @Serializable
+enum class ReleaseAlerts(val label: String) { OFF("Off"), WEEKLY("Weekly summary"), AS_THEY_COME("As they come out") }
+
+@Serializable
 data class Settings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     val accentFromArtwork: Boolean = true,
@@ -40,6 +43,22 @@ data class Settings(
     val youtubeProfile: YouTubeProfile = YouTubeProfile.DEFAULT,
     val autoUpdateEngine: Boolean = true,
     val lastEngineCheck: Long = 0,
+    // Recommendations
+    val suggestions: Boolean = true,
+    /** 0 = mostly what you know, 1 = mostly new to you. */
+    val discoverLevel: Float = 0.5f,
+    val excludedGenres: List<String> = emptyList(),
+    val releaseAlerts: ReleaseAlerts = ReleaseAlerts.AS_THEY_COME,
+    /** How recent a release must be to count as new. */
+    val releaseWindowDays: Int = 30,
+    val usePhoneMusic: Boolean = false,
+    val useDeezer: Boolean = true,
+    val useYouTubeRadio: Boolean = true,
+    val lastFmUser: String = "",
+    val lastFmApiKey: String = "",
+    val listenBrainzUser: String = "",
+    val suggestionsOnWifiOnly: Boolean = false,
+    val suggestionsWhileCharging: Boolean = false,
 )
 
 /** Settings in one JSON document, so they back up and restore as a whole. */

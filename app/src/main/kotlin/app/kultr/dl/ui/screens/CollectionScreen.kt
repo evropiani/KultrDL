@@ -19,7 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.BookmarkAdd
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -45,6 +47,7 @@ import app.kultr.dl.core.util.Format
 import app.kultr.dl.data.describe
 import app.kultr.dl.ui.CollectionCache
 import app.kultr.dl.ui.LocalActions
+import app.kultr.dl.ui.LocalBlocks
 import app.kultr.dl.ui.chromePadding
 import app.kultr.dl.ui.components.AccentWash
 import app.kultr.dl.ui.components.ArtworkFill
@@ -126,12 +129,19 @@ private fun Header(c: Collection) {
             label = c.title,
         )
         Spacer(Modifier.height(16.dp))
-        Eyebrow("${c.source.label} · ${if (c.kind == CollectionKind.ALBUM) "Album" else "Playlist"}")
+        Eyebrow(
+            when {
+                c.id.startsWith("mix:") -> "Made for you"
+                c.recordType == "single" -> "${c.source.label} · Single"
+                c.recordType == "ep" -> "${c.source.label} · EP"
+                else -> "${c.source.label} · ${if (c.kind == CollectionKind.ALBUM) "Album" else "Playlist"}"
+            },
+        )
         Spacer(Modifier.height(4.dp))
         Text(c.title, style = MaterialTheme.typography.headlineSmall, color = Kultr.colors.ink, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
         val meta = listOfNotNull(
             c.subtitle,
-            c.year?.toString(),
+            Format.released(c.releaseDate)?.takeIf { c.releaseDate != null && c.year == java.time.LocalDate.now().year } ?: c.year?.toString(),
             (c.tracks.size.takeIf { it > 0 } ?: c.trackCount)?.let { Format.count(it, "track") },
             c.tracks.mapNotNull { it.durationMs }.takeIf { it.isNotEmpty() }?.sum()?.let { Format.duration(it) },
         ).joinToString(" · ")
@@ -143,13 +153,20 @@ private fun Header(c: Collection) {
 @Composable
 private fun Actions(c: Collection) {
     val actions = LocalActions.current
+    val blocks = LocalBlocks.current
+    val feed by actions.graph.recommender.feed.collectAsStateWithLifecycle()
+    val mix = if (c.id.startsWith("mix:")) feed?.mixes?.firstOrNull { "mix:" + it.id == c.id } else null
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Pill("Play", icon = Icons.Rounded.PlayArrow, accent = true, onClick = { actions.play(c.tracks) })
         Pill("Shuffle", icon = Icons.Rounded.Shuffle, onClick = { actions.shuffle(c.tracks) })
+        if (mix != null) Pill("Keep updated", icon = Icons.Rounded.Autorenew, onClick = { actions.followMix(mix) })
         Pill("Download all", icon = Icons.Rounded.Download, onClick = { actions.download(c.tracks) })
+        if (actions.canDownloadToNavidrome()) {
+            Pill("Download to Navidrome", icon = Icons.Rounded.CloudDownload, onClick = { actions.downloadToNavidrome(c.tracks) })
+        }
         Pill("Download as…", icon = Icons.Rounded.Tune, onClick = { actions.downloadAs(c.tracks) })
         Pill("Save as playlist", icon = Icons.AutoMirrored.Rounded.PlaylistAdd, onClick = {
             actions.launch {
@@ -158,6 +175,15 @@ private fun Actions(c: Collection) {
             }
         })
         Pill("Save tracks", icon = Icons.Rounded.BookmarkAdd, onClick = { actions.setSaved(c.tracks, true) })
+    }
+    val hidden = c.tracks.count(blocks::blocks)
+    if (hidden > 0) {
+        Text(
+            "${Format.count(hidden, "song")} by blocked artists hidden",
+            style = MaterialTheme.typography.bodySmall,
+            color = Kultr.colors.ink3,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
     }
     Spacer(Modifier.height(8.dp))
 }

@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.util.Log
 import app.kultr.dl.engine.DownloadWorker
+import app.kultr.dl.engine.Recommender
 import app.kultr.dl.engine.YtDlp
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -24,6 +25,7 @@ class KultrDLApp : Application(), SingletonImageLoader.Factory {
         graph.ytDlp.start()
         graph.downloads.recover()
         keepEngineFresh()
+        graph.recommender.schedule()
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =
@@ -36,6 +38,9 @@ class KultrDLApp : Application(), SingletonImageLoader.Factory {
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(
             NotificationChannel(DownloadWorker.CHANNEL, getString(R.string.channel_downloads), NotificationManager.IMPORTANCE_LOW),
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(Recommender.CHANNEL, getString(R.string.channel_releases), NotificationManager.IMPORTANCE_DEFAULT),
         )
     }
 

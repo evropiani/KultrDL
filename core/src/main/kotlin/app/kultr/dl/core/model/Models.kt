@@ -23,6 +23,12 @@ enum class Source(val label: String, val streams: Boolean, val searchable: Boole
     QOBUZ("Qobuz", streams = false, searchable = false),
     AMAZON_MUSIC("Amazon Music", streams = false, searchable = false),
     WEB("Web", streams = true, searchable = false),
+    /** Songs on the user's Navidrome (Subsonic) server, streamed from it. */
+    NAVIDROME("Navidrome", streams = true, searchable = false),
+    /** Music files already on the phone. */
+    PHONE("This phone", streams = true, searchable = false),
+    /** Tracks from ListenBrainz's weekly playlists: names only, matched like a catalogue. */
+    LISTENBRAINZ("ListenBrainz", streams = false, searchable = false),
     ;
 
     companion object {
@@ -71,6 +77,11 @@ data class Collection(
     val pageUrl: String? = null,
     val year: Int? = null,
     val trackCount: Int? = null,
+    /** "2026-09-26", when the source gives the full date. */
+    val releaseDate: String? = null,
+    /** "album", "single", "ep" or "compile", when the source says. */
+    val recordType: String? = null,
+    val genre: String? = null,
     /** Empty until loaded (search results list albums without their tracks). */
     val tracks: List<Track> = emptyList(),
 )

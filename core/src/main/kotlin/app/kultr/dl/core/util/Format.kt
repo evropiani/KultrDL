@@ -29,6 +29,31 @@ object Format {
         else -> "Up late"
     }
 
+    /** "Today", "Yesterday", "3 days ago", "2 weeks ago" or "12 Mar 2026" for a "2026-03-12" release date. */
+    fun released(date: String?, today: java.time.LocalDate = java.time.LocalDate.now()): String? {
+        val d = date?.take(10)?.let { runCatching { java.time.LocalDate.parse(it) }.getOrNull() } ?: return null
+        val days = java.time.temporal.ChronoUnit.DAYS.between(d, today)
+        return when {
+            days < 0 -> "Out ${d.dayOfMonth} ${d.month.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH)}"
+            days == 0L -> "Today"
+            days == 1L -> "Yesterday"
+            days < 14 -> "$days days ago"
+            days < 60 -> "${days / 7} weeks ago"
+            else -> "${d.dayOfMonth} ${d.month.getDisplayName(java.time.format.TextStyle.SHORT, Locale.ENGLISH)} ${d.year}"
+        }
+    }
+
+    /** "just now", "5 min ago", "3 h ago", "2 days ago". */
+    fun ago(at: Long, now: Long = System.currentTimeMillis()): String {
+        val minutes = (now - at) / 60_000
+        return when {
+            minutes < 1 -> "just now"
+            minutes < 60 -> "$minutes min ago"
+            minutes < 48 * 60 -> "${minutes / 60} h ago"
+            else -> "${minutes / (24 * 60)} days ago"
+        }
+    }
+
     fun initials(text: String): String =
         text.split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "♪" }
 }

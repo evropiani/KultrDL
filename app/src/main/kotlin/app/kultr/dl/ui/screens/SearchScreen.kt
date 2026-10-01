@@ -51,6 +51,7 @@ import app.kultr.dl.core.model.Track
 import app.kultr.dl.core.util.Format
 import app.kultr.dl.data.describe
 import app.kultr.dl.ui.LocalActions
+import app.kultr.dl.ui.LocalBlocks
 import app.kultr.dl.ui.chromePadding
 import app.kultr.dl.ui.components.ArtworkFill
 import app.kultr.dl.ui.components.CollectionCard
@@ -78,6 +79,7 @@ fun SearchScreen(query: String) {
     val graph = actions.graph
     val settings by graph.settings.settings.collectAsStateWithLifecycle()
     val player by graph.player.ui.collectAsStateWithLifecycle()
+    val blocks = LocalBlocks.current
     val recent by graph.library.recentSearches.collectAsStateWithLifecycle(emptyList())
     val source = settings.searchSource
     val trimmed = query.trim()
@@ -173,10 +175,12 @@ fun SearchScreen(query: String) {
                 link != null -> linkResult(link!!, player.current?.id) { tracks, i -> actions.play(tracks, i) }
                 results.isEmpty -> item(key = "none") { EmptyState(Icons.Rounded.Search, "Nothing matches “$trimmed”", body = "Try another source above.") }
                 else -> {
-                    if (results.collections.isNotEmpty()) {
+                    // Albums by blocked artists are left out (their songs are hidden row by row).
+                    val albums = results.collections.filterNot(blocks::blocks)
+                    if (albums.isNotEmpty()) {
                         item(key = "albums") {
                             SectionHeader("Albums")
-                            Shelf(results.collections, key = { it.id }) { _, c, modifier -> CollectionCard(c, { actions.openCollection(c) }, modifier) }
+                            Shelf(albums, key = { it.id }) { _, c, modifier -> CollectionCard(c, { actions.openCollection(c) }, modifier) }
                         }
                     }
                     if (results.tracks.isNotEmpty()) {

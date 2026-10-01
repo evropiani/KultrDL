@@ -12,6 +12,7 @@ import app.kultr.dl.core.util.list
 import app.kultr.dl.core.util.long
 import app.kultr.dl.core.util.parseJson
 import app.kultr.dl.core.util.str
+import app.kultr.dl.core.discover.ArtistRef
 import java.net.URLEncoder
 import kotlinx.serialization.json.JsonElement
 
@@ -31,6 +32,17 @@ class AppleMusic(private val http: Http, private val country: () -> String) {
     }
 
     suspend fun song(trackId: String): Track? = parseResults(get("lookup?id=$trackId")).first.firstOrNull()
+
+    suspend fun searchArtists(name: String): List<ArtistRef> =
+        get("search?term=${enc(name)}&media=music&entity=musicArtist&limit=8").at("results").list.mapNotNull { r ->
+            val id = r.at("artistId").long ?: return@mapNotNull null
+            ArtistRef("apple:$id", r.at("artistName").str ?: return@mapNotNull null)
+        }
+
+    /** An artist's albums, EPs and singles, newest first. */
+    suspend fun artistAlbums(artistId: String): List<Collection> =
+        parseResults(get("lookup?id=$artistId&entity=album&sort=recent&limit=60")).second
+            .sortedByDescending { it.releaseDate.orEmpty() }
 
     /** The most played songs in the user's country right now. */
     suspend fun topSongs(limit: Int = 25): List<Track> {
@@ -84,16 +96,27 @@ class AppleMusic(private val http: Http, private val country: () -> String) {
 
         private fun parseAlbum(r: JsonElement): Collection? {
             val id = r.at("collectionId").long ?: return null
+            val name = r.at("collectionName").str ?: return null
+            // Apple names singles and EPs "Title - Single" and "Title - EP".
+            val type = when {
+                name.endsWith(" - Single") -> "single"
+                name.endsWith(" - EP") -> "ep"
+                r.at("collectionType").str == "Compilation" -> "compile"
+                else -> "album"
+            }
             return Collection(
                 id = "apple:album:$id",
                 source = Source.APPLE_MUSIC,
                 kind = CollectionKind.ALBUM,
-                title = r.at("collectionName").str ?: return null,
+                title = name.removeSuffix(" - Single").removeSuffix(" - EP"),
                 subtitle = r.at("artistName").str,
                 artworkUrl = bigArtwork(r.at("artworkUrl100").str),
                 pageUrl = r.at("collectionViewUrl").str?.substringBefore("?uo="),
                 year = Text.year(r.at("releaseDate").str),
                 trackCount = r.at("trackCount").int,
+                releaseDate = r.at("releaseDate").str?.take(10),
+                recordType = type,
+                genre = r.at("primaryGenreName").str,
             )
         }
 

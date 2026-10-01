@@ -131,6 +131,69 @@ data class DownloadEntity(
     val downloadState: DownloadState get() = runCatching { DownloadState.valueOf(state) }.getOrDefault(DownloadState.FAILED)
 }
 
+/**
+ * One listen, as the player saw it: how long it played and whether it was
+ * finished or skipped. Skips tell the recommendations what not to suggest.
+ */
+@Entity(tableName = "plays", indices = [Index("trackId"), Index("startedAt")])
+data class PlayEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val trackId: String,
+    val artist: String,
+    val title: String,
+    val startedAt: Long,
+    val listenedMs: Long,
+    val durationMs: Long?,
+    val completed: Boolean,
+    val skipped: Boolean,
+)
+
+/** Where a song the user owns lives. */
+enum class Owner { PHONE, NAVIDROME }
+
+/**
+ * A song in the user's own collection: a music file on the phone, or a
+ * song on their Navidrome server with its play count, star and rating.
+ */
+@Entity(tableName = "owned_songs", indices = [Index("owner"), Index("artist")])
+data class OwnedSongEntity(
+    @PrimaryKey val id: String,
+    val owner: String,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    val albumArtist: String?,
+    val genre: String?,
+    val year: Int?,
+    val trackNumber: Int?,
+    val durationMs: Long?,
+    val playCount: Int,
+    val lastPlayedAt: Long?,
+    val starred: Boolean,
+    val rating: Int,
+    val artworkUrl: String?,
+    /** A content:// URI for a file on the phone; the stream address (without login) on Navidrome. */
+    val streamUrl: String?,
+    /** The server's id for the artist, to ask it for similar artists. */
+    val artistId: String?,
+    val addedAt: Long?,
+) {
+    fun toTrack(): Track = Track(
+        id = id,
+        source = if (owner == Owner.NAVIDROME.name) Source.NAVIDROME else Source.PHONE,
+        title = title,
+        artist = artist,
+        album = album,
+        albumArtist = albumArtist,
+        durationMs = durationMs,
+        artworkUrl = artworkUrl,
+        streamUrl = streamUrl,
+        year = year,
+        trackNumber = trackNumber,
+        genre = genre,
+    )
+}
+
 @Entity(tableName = "searches")
 data class SearchEntity(
     @PrimaryKey val query: String,

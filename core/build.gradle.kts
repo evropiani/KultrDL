@@ -40,4 +40,6 @@ tasks.test {
     useJUnit()
     // The test servers write files named "Björk"; the JVM needs a UTF-8 locale for that.
     environment("LC_ALL", "C.UTF-8")
+    // LiveSourcesTest runs only with LIVE_SOURCES=1; make the switch an input so it isn't skipped as up to date.
+    inputs.property("liveSources", System.getenv("LIVE_SOURCES") ?: "")
 }

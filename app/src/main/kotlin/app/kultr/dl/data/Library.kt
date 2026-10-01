@@ -3,6 +3,8 @@ package app.kultr.dl.data
 import androidx.room.withTransaction
 import app.kultr.dl.core.model.Track
 import app.kultr.dl.data.db.KultrDLDatabase
+import app.kultr.dl.data.db.OwnedSongEntity
+import app.kultr.dl.data.db.PlayEntity
 import app.kultr.dl.data.db.PlaylistEntity
 import app.kultr.dl.data.db.PlaylistSummary
 import app.kultr.dl.data.db.PlaylistTrackEntity
@@ -75,7 +77,40 @@ class Library(private val db: KultrDLDatabase, scope: CoroutineScope) {
 
     suspend fun markPlayed(id: String) = tracks.markPlayed(id, System.currentTimeMillis())
 
-    suspend fun clearHistory() = tracks.clearHistory()
+    suspend fun clearHistory() {
+        tracks.clearHistory()
+        db.plays().clear()
+    }
+
+    // ------------------------------------------------- for recommendations --
+
+    suspend fun recordPlay(play: PlayEntity) {
+        db.plays().insert(play)
+        // A year of listens is plenty for taste; older ones go.
+        if (kotlin.random.Random.nextInt(200) == 0) db.plays().prune(System.currentTimeMillis() - 400L * 86_400_000)
+    }
+
+    suspend fun playsSince(since: Long): List<PlayEntity> = db.plays().since(since)
+
+    /** Swap in a fresh list of the songs on the phone or on Navidrome. */
+    suspend fun replaceOwned(owner: String, songs: List<OwnedSongEntity>) = db.withTransaction {
+        db.owned().clear(owner)
+        songs.chunked(500).forEach { db.owned().insertAll(it) }
+    }
+
+    /** Everything the user has played, hearted, saved or downloaded. */
+    suspend fun known(): List<TrackEntity> = tracks.known()
+
+    suspend fun playlistsWithTracks(): Map<PlaylistEntity, List<String>> {
+        val entries = playlists.allEntries().groupBy { it.playlistId }
+        return playlists.all().associateWith { p -> entries[p.id].orEmpty().sortedBy { it.position }.map { it.trackId } }
+    }
+
+    /** Replace a followed mix's tracks with today's. */
+    suspend fun replacePlaylistTracks(id: Long, list: List<Track>) {
+        remember(list)
+        db.withTransaction { writeOrder(id, list.map { it.id }) }
+    }
 
     suspend fun setMatchedUrl(id: String, url: String?) = tracks.setMatchedUrl(id, url)
 

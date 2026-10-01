@@ -29,6 +29,7 @@ import app.kultr.dl.ui.theme.isDark
 class MainActivity : ComponentActivity() {
     private var openPlayer by mutableIntStateOf(0)
     private var openDownloads by mutableIntStateOf(0)
+    private var openHome by mutableIntStateOf(0)
     private var sharedLink by mutableStateOf<Pair<Int, String>?>(null)
 
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -52,7 +53,7 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
             }
             KultrTheme(settings, accent) {
-                KultrDLUi(UiRequests(openPlayer, openDownloads, sharedLink))
+                KultrDLUi(UiRequests(openPlayer, openDownloads, sharedLink, openHome))
             }
         }
     }
@@ -77,6 +78,7 @@ class MainActivity : ComponentActivity() {
         intent ?: return
         if (intent.getBooleanExtra(EXTRA_OPEN_PLAYER, false)) openPlayer++
         if (intent.getBooleanExtra(EXTRA_OPEN_DOWNLOADS, false)) openDownloads++
+        if (intent.getBooleanExtra(EXTRA_OPEN_HOME, false)) openHome++
         val text = when (intent.action) {
             Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
             Intent.ACTION_VIEW -> intent.dataString
@@ -99,6 +101,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_OPEN_PLAYER = "kultrdl.open_player"
         const val EXTRA_OPEN_DOWNLOADS = "kultrdl.open_downloads"
+        const val EXTRA_OPEN_HOME = "kultrdl.open_home"
         private const val KEY_ASKED_NOTIFICATIONS = "askedNotifications"
     }
 }

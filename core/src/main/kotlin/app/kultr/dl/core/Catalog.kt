@@ -142,6 +142,7 @@ class Catalog(
             Source.TIDAL, Source.AMAZON_MUSIC -> odesliLink(target)
             Source.QOBUZ -> pageLink(target)
             Source.YOUTUBE, Source.SOUNDCLOUD, Source.BANDCAMP, Source.WEB -> extract(target.url)
+            Source.NAVIDROME, Source.PHONE, Source.LISTENBRAINZ -> extract(target.url)
         }
     }
 

@@ -71,6 +71,7 @@ import app.kultr.dl.data.db.DownloadState
 import app.kultr.dl.ui.components.AddToPlaylistDialog
 import app.kultr.dl.ui.components.ArtworkBackdropPlain
 import app.kultr.dl.ui.components.DownloadAsDialog
+import app.kultr.dl.ui.components.BlockArtistDialog
 import app.kultr.dl.ui.components.SendToServerDialog
 import app.kultr.dl.ui.components.LocalGlassBackdrop
 import app.kultr.dl.ui.components.glassSource
@@ -86,6 +87,8 @@ import app.kultr.dl.ui.screens.LibraryScreen
 import app.kultr.dl.ui.screens.LibraryTab
 import app.kultr.dl.ui.screens.PlaylistScreen
 import app.kultr.dl.ui.screens.SearchScreen
+import app.kultr.dl.ui.screens.BlockedArtistsScreen
+import app.kultr.dl.ui.screens.NavidromeScreen
 import app.kultr.dl.ui.screens.ServerEditorScreen
 import app.kultr.dl.ui.screens.ServersScreen
 import app.kultr.dl.ui.screens.SettingsScreen
@@ -100,7 +103,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Requests from outside the interface: notification taps and shared links. */
-data class UiRequests(val openPlayer: Int = 0, val openDownloads: Int = 0, val sharedLink: Pair<Int, String>? = null)
+data class UiRequests(val openPlayer: Int = 0, val openDownloads: Int = 0, val sharedLink: Pair<Int, String>? = null, val openHome: Int = 0)
 
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     HOME(Routes.HOME, "Home", Icons.Rounded.Home),
@@ -153,6 +156,7 @@ fun KultrDLUi(requests: UiRequests) {
     val player by graph.player.ui.collectAsStateWithLifecycle()
     val settings by graph.settings.settings.collectAsStateWithLifecycle()
     val flags by graph.library.flags.collectAsStateWithLifecycle()
+    val blocks by graph.taste.blocks.collectAsStateWithLifecycle()
     val downloadRows by graph.downloads.all.collectAsStateWithLifecycle(emptyList())
     val liveProgress by graph.downloads.progress.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -228,12 +232,15 @@ fun KultrDLUi(requests: UiRequests) {
         }
     }
 
+    LaunchedEffect(requests.openHome) { if (requests.openHome > 0) openTab(Tab.HOME) }
+
     CompositionLocalProvider(
         LocalActions provides actions,
         LocalGlassBackdrop provides glass,
         LocalChromeInset provides chromeInset,
         LocalTrackFlags provides flags,
         LocalDownloadBadges provides badges,
+        LocalBlocks provides blocks,
     ) {
         // Test tags become resource ids, so the emulator smoke test can find fields.
         Box(Modifier.fillMaxSize().semantics { testTagsAsResourceId = true }) {
@@ -260,6 +267,8 @@ fun KultrDLUi(requests: UiRequests) {
                     composable(Routes.DOWNLOADS) { DownloadsScreen() }
                     composable(Routes.SETTINGS) { SettingsScreen() }
                     composable(Routes.SERVERS) { ServersScreen() }
+                    composable(Routes.NAVIDROME) { NavidromeScreen() }
+                    composable(Routes.BLOCKED) { BlockedArtistsScreen() }
                     composable(Routes.SERVER) { ServerEditorScreen(it.arguments?.getString("id").orEmpty()) }
                     composable(Routes.COLLECTION) { CollectionScreen(it.arguments?.getString("id").orEmpty()) }
                     composable(
@@ -331,5 +340,6 @@ fun KultrDLUi(requests: UiRequests) {
         dialogs.addToPlaylist?.let { tracks -> AddToPlaylistDialog(tracks, onDismiss = { dialogs.addToPlaylist = null }) }
         dialogs.downloadAs?.let { tracks -> DownloadAsDialog(tracks, onDismiss = { dialogs.downloadAs = null }) }
         dialogs.sendTo?.let { tracks -> SendToServerDialog(tracks, onDismiss = { dialogs.sendTo = null }) }
+        dialogs.block?.let { track -> BlockArtistDialog(track, onDismiss = { dialogs.block = null }) }
     }
 }

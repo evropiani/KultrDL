@@ -84,6 +84,9 @@ class Downloads(
     /** Server connections in use, by track, so a cancel can cut them. */
     private val sessions = ConcurrentHashMap<String, Closeable>()
 
+    /** Told which server folders received files once the queue is empty (to have Navidrome rescan). */
+    var afterSent: (suspend (Set<Destination>) -> Unit)? = null
+
     suspend fun enqueue(
         tracks: List<Track>,
         preset: DownloadPreset = settings.settings.value.download,
@@ -116,8 +119,10 @@ class Downloads(
         val now = System.currentTimeMillis()
         val preset = settings.settings.value.download
         var queued = 0
+        library.remember(tracks)
         for (t in tracks.distinctBy { it.id }) {
-            if (library.entity(t.id)?.localUri == null) continue
+            // Downloads, and music files that were already on the phone.
+            if (library.entity(t.id)?.localUri == null && t.source != app.kultr.dl.core.model.Source.PHONE) continue
             val existing = dao.get(t.id)
             if (existing != null && existing.downloadState in setOf(DownloadState.QUEUED, DownloadState.RUNNING)) continue
             dao.upsert(
@@ -195,6 +200,18 @@ class Downloads(
 
     internal suspend fun runQueue(worker: DownloadWorker) {
         var done = 0
+        val sentTo = HashSet<Destination>()
+        try {
+            drain(worker, sentTo) { done++ }
+        } finally {
+            if (sentTo.isNotEmpty()) {
+                runCatching { afterSent?.invoke(sentTo) }.onFailure { Log.w("KultrDL", "After uploads", it) }
+            }
+        }
+    }
+
+    private suspend fun drain(worker: DownloadWorker, sentTo: MutableSet<Destination>, onDone: () -> Unit) {
+        var done = 0
         while (true) {
             val row = dao.nextQueued() ?: break
             dao.setState(row.trackId, DownloadState.RUNNING.name, 0f, "Starting…")
@@ -208,7 +225,9 @@ class Downloads(
                 }
                 if (dao.get(row.trackId)?.downloadState == DownloadState.CANCELLED) continue
                 dao.setState(row.trackId, DownloadState.DONE.name, 1f, note)
+                if (note != null) row.destination?.let { runCatching { LenientJson.decodeFromString(Destination.serializer(), it) }.getOrNull() }?.let(sentTo::add)
                 done++
+                onDone()
             } catch (e: CancellationException) {
                 val current = dao.get(row.trackId)
                 if (current?.downloadState == DownloadState.CANCELLED) continue
@@ -311,6 +330,7 @@ class Downloads(
     /** A track that is on the phone already, sent as it is. */
     private suspend fun sendFromPhone(track: Track, destination: Destination, server: SavedServer, onProgress: (Float, String) -> Unit): String {
         val uri = library.entity(track.id)?.localUri
+            ?: track.streamUrl?.takeIf { track.source == app.kultr.dl.core.model.Source.PHONE }
             ?: throw IOException("“${track.title}” isn't on this phone any more.")
         val file = saver.describe(uri) ?: throw IOException("“${track.title}” isn't on this phone any more.")
         val name = fileName(track, file.name.substringAfterLast('.', "").lowercase().ifEmpty { "mp3" })

@@ -47,6 +47,7 @@ import app.kultr.dl.core.model.Source
 import app.kultr.dl.core.model.Track
 import app.kultr.dl.core.util.Format
 import app.kultr.dl.ui.LocalActions
+import app.kultr.dl.ui.LocalBlocks
 import app.kultr.dl.ui.Routes
 import app.kultr.dl.ui.chromePadding
 import app.kultr.dl.ui.components.CollectionCard
@@ -67,14 +68,19 @@ fun HomeScreen() {
     val actions = LocalActions.current
     val graph = actions.graph
     val context = LocalContext.current
-    val history by remember { graph.library.history(20) }.collectAsStateWithLifecycle(emptyList())
-    val favorites by graph.library.favorites.collectAsStateWithLifecycle(emptyList())
+    val blocks = LocalBlocks.current
+    val settings by graph.settings.settings.collectAsStateWithLifecycle()
+    val allHistory by remember { graph.library.history(20) }.collectAsStateWithLifecycle(emptyList())
+    val allFavorites by graph.library.favorites.collectAsStateWithLifecycle(emptyList())
+    val history = remember(allHistory, blocks) { blocks.tracks(allHistory) }
+    val favorites = remember(allFavorites, blocks) { blocks.tracks(allFavorites) }
     val playlists by graph.library.playlistSummaries.collectAsStateWithLifecycle(emptyList())
     val player by graph.player.ui.collectAsStateWithLifecycle()
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
-    val charts by produceState<List<Track>>(emptyList()) {
+    val allCharts by produceState<List<Track>>(emptyList()) {
         value = runCatching { graph.catalog.apple.topSongs(25) }.getOrElse { runCatching { graph.catalog.deezer.chart() }.getOrDefault(emptyList()) }
     }
+    val charts = remember(allCharts, blocks) { blocks.tracks(allCharts) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = chromePadding())) {
         item(key = "head") {
@@ -107,6 +113,9 @@ fun HomeScreen() {
             }
         }
 
+        if (settings.suggestions) {
+            item(key = "for-you") { ForYouSection() }
+        }
         if (history.isNotEmpty()) {
             item(key = "history") {
                 SectionHeader("Jump back in", icon = Icons.Rounded.History)

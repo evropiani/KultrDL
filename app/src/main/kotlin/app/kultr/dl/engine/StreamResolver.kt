@@ -2,6 +2,8 @@ package app.kultr.dl.engine
 
 import android.net.Uri
 import app.kultr.dl.core.Catalog
+import app.kultr.dl.core.model.Source
+import app.kultr.dl.core.sources.Subsonic
 import app.kultr.dl.core.model.Track
 import app.kultr.dl.core.util.at
 import app.kultr.dl.core.util.list
@@ -31,6 +33,8 @@ class StreamResolver(
     private val ytDlp: YtDlp,
     private val settings: SettingsRepository,
     private val scope: CoroutineScope,
+    /** The user's Navidrome server, for its songs. */
+    private val navidrome: () -> Subsonic? = { null },
 ) {
     sealed interface Resolved {
         data class Local(val uri: Uri) : Resolved
@@ -84,12 +88,28 @@ class StreamResolver(
 
     suspend fun resolve(trackId: String): Resolved {
         local(trackId)?.let { return it }
+        own(trackId)?.let { return it }
         cache[trackId]?.let { if (it.expiresAt > System.currentTimeMillis()) return it.value }
         val job = inFlight.getOrPut(trackId) { scope.async { fetch(trackId) } }
         return try {
             job.await()
         } finally {
             inFlight.remove(trackId, job)
+        }
+    }
+
+    /**
+     * The user's own songs play from where they are: a file on the phone,
+     * or a stream from their Navidrome (the login is added to the request
+     * by the app's HTTP client).
+     */
+    private suspend fun own(trackId: String): Resolved? {
+        val track = library.track(trackId) ?: return null
+        val url = track.streamUrl ?: return null
+        return when (track.source) {
+            Source.PHONE -> Resolved.Local(Uri.parse(url))
+            Source.NAVIDROME -> Resolved.Remote(url, emptyMap(), hls = false)
+            else -> null
         }
     }
 
@@ -121,6 +141,16 @@ class StreamResolver(
      * remembered).
      */
     suspend fun sourceUrl(track: Track): String {
+        when (track.source) {
+            // The original file, with the login (yt-dlp makes its own requests).
+            Source.NAVIDROME -> {
+                val server = navidrome() ?: throw IOException("Navidrome isn't connected any more (Settings → Recommendations → Navidrome).")
+                val stream = track.streamUrl ?: throw IOException("Unknown Navidrome song.")
+                return server.authenticate(stream.replace("/rest/stream?", "/rest/download?"))
+            }
+            Source.PHONE -> throw IOException("“${track.title}” is already on this phone.")
+            else -> Unit
+        }
         track.streamUrl?.let { return it }
         library.entity(track.id)?.matchedUrl?.let { return it }
         track.matchUrl?.let {

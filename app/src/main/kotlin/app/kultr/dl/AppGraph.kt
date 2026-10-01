@@ -5,11 +5,15 @@ import app.kultr.dl.core.Catalog
 import app.kultr.dl.core.net.Http
 import app.kultr.dl.data.Library
 import app.kultr.dl.data.Messages
+import app.kultr.dl.data.NavidromeRepository
 import app.kultr.dl.data.ServerRepository
+import app.kultr.dl.data.TasteStore
 import app.kultr.dl.data.SettingsRepository
 import app.kultr.dl.data.db.KultrDLDatabase
 import app.kultr.dl.engine.Downloads
 import app.kultr.dl.engine.MediaSaver
+import app.kultr.dl.engine.PhoneMusic
+import app.kultr.dl.engine.Recommender
 import app.kultr.dl.engine.StreamDns
 import app.kultr.dl.engine.StreamResolver
 import app.kultr.dl.engine.YouTubeCheck
@@ -31,17 +35,31 @@ class AppGraph(val app: Application) {
         .readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(true)
         .dns(StreamDns)
+        // Navidrome covers and streams are stored without the login; it is added to each request.
+        .addInterceptor { chain ->
+            val request = chain.request()
+            val server = navidrome.client(http)
+            val url = request.url.toString()
+            if (server != null && server.owns(url) && request.url.queryParameter("t") == null && request.url.queryParameter("p") == null) {
+                chain.proceed(request.newBuilder().url(server.authenticate(url)).build())
+            } else {
+                chain.proceed(request)
+            }
+        }
         .build()
+    val http = Http(okHttp)
 
     val settings = SettingsRepository(app)
     val servers = ServerRepository(app)
+    val taste = TasteStore(app)
+    val navidrome = NavidromeRepository(app)
     val messages = Messages()
     private val db = KultrDLDatabase.open(app)
     val library = Library(db, scope)
     val ytDlp = YtDlp(app, scope)
 
     val catalog = Catalog(
-        http = Http(okHttp),
+        http = http,
         extractor = ytDlp,
         country = { settings.settings.value.country.ifBlank { Locale.getDefault().country.ifBlank { "US" } } },
         spotifyCredentials = {
@@ -50,9 +68,13 @@ class AppGraph(val app: Application) {
         },
     )
 
-    val resolver = StreamResolver(library, catalog, ytDlp, settings, scope)
+    val resolver = StreamResolver(library, catalog, ytDlp, settings, scope) { navidrome.client(http) }
     val saver = MediaSaver(app)
     val youtubeCheck = YouTubeCheck(ytDlp, okHttp, settings)
     val downloads = Downloads(app, db.downloads(), library, settings, servers, resolver, ytDlp, saver, okHttp, scope)
+    val phone = PhoneMusic(app)
+    val recommender = Recommender(app, library, db.owned(), settings, taste, navidrome, catalog, phone, http, scope).also { r ->
+        downloads.afterSent = { r.afterUploads(it) }
+    }
     val player = PlayerConnection(app, library, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
 }
