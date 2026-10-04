@@ -131,4 +131,24 @@ class RecommendationSourcesTest {
             server.close()
         }
     }
+
+    @Test
+    fun subsonicSaysWhetherTheAccountIsAnAdmin() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","user":{"username":"me","adminRole":false,"streamRole":true}}}""").build())
+            server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","user":{"username":"admin","adminRole":true}}}""").build())
+            server.enqueue(MockResponse.Builder().body("""{"subsonic-response":{"status":"ok","user":{"username":"x"}}}""").build())
+            val client = Subsonic(Http(OkHttpClient()), Subsonic.Server(server.url("/").toString(), "me", "pw"))
+            assertEquals(false, client.isAdmin())
+            assertEquals(true, client.isAdmin())
+            assertNull(client.isAdmin())
+            val asked = server.takeRequest().url
+            assertEquals("/rest/getUser.view", asked.encodedPath)
+            assertEquals("me", asked.queryParameter("username"))
+        } finally {
+            server.close()
+        }
+    }
 }

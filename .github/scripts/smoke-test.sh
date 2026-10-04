@@ -70,6 +70,18 @@ tap_scrolling() {
   "$@"
 }
 type_into() { tap_scrolling tap_attr resource-id "$1" || return 1; sleep 1; adb shell input text "$2"; sleep 1; hide_keyboard; }
+# Replace what a field holds: to its end, delete back, type.
+retype_into() {
+  tap_scrolling tap_attr resource-id "$1" || return 1
+  sleep 1
+  adb shell input keyevent KEYCODE_MOVE_END
+  adb shell input keyevent $(printf '67 %.0s' $(seq 1 30))
+  sleep 1
+  adb shell input text "$2"
+  sleep 1
+}
+# Whether a node with this test tag is on the page, scrolling down to it.
+see_attr_scrolling() { for _ in 1 2 3 4 5 6; do dump_ui && [ -n "$(find_node resource-id "$1")" ] && return 0; swipe_up; done; return 1; }
 # Open a tab of the floating bar. While a search is open the bar shows a back button
 # instead of the tabs, so go back (and bring the app forward again) until they show.
 go_tab() {
@@ -274,6 +286,9 @@ if [ -n "$played_from" ]; then
   fi
 
   echo "== Navidrome and recommendations"
+  ready() { grep -c "Recommendations ready" "$OUT/logcat.txt"; }
+  wait_ready() { for _ in $(seq 1 90); do [ "$(ready)" -gt "$1" ] && return 0; sleep 2; done; return 1; }
+  r0=$(ready)
   if step "open Settings" go_tab "Settings" &&
     step "open Recommendations" tap_scrolling tap_text "Recommendations" &&
     step "open Navidrome" tap_scrolling tap_text "Navidrome" &&
@@ -284,11 +299,32 @@ if [ -n "$played_from" ]; then
     for _ in $(seq 1 40); do log_has "Navidrome: synced|Navidrome sync failed|Navidrome: .*Couldn" && break; sleep 2; done
     grep -E "Navidrome" "$OUT/logcat.txt" | grep KultrDL | tail -3
     if log_has "Navidrome: synced [1-9]"; then echo "Navidrome synced"; else failures+=("Navidrome didn't sync"); screenshot navidrome-failed; screen_text | head -40; fi
+    # The plays on this server belong to "listener"; signed in as the admin, the page says to use the account you listen with.
+    if wait_screen "is an admin account" 5; then echo "The page points out the admin account"; else failures+=("no hint about signing in as an admin"); fi
+    wait_ready "$r0" || true
+    r0=$(ready)
+    if step "type the listening username" retype_into navidrome-user "listener" &&
+      step "type its password" retype_into navidrome-password "listen-pass" &&
+      step "tap Save" tap_scrolling tap_attr resource-id navidrome-save; then
+      for _ in $(seq 1 40); do log_has "played by listener|Navidrome sync failed" && break; sleep 2; done
+      grep -E "Navidrome" "$OUT/logcat.txt" | grep KultrDL | tail -2
+      if log_has "Navidrome: synced [1-9][0-9]* songs \([1-9][0-9]* played by listener\)"; then
+        echo "Navidrome reads the listening account's plays"
+      else
+        failures+=("Navidrome didn't read the listening account's plays")
+      fi
+      if see_attr_scrolling navidrome-admin-kept; then
+        echo "Kept for rescans: $(screen_text | grep "Rescans sign in as")"
+      else
+        failures+=("the admin login wasn't kept for rescans"); screen_text | head -40
+      fi
+    else
+      failures+=("couldn't switch to the listening account")
+    fi
     # The recommendations rebuild after the sync, from Navidrome's plays and the songs played here.
-    before=$(grep -c "Recommendations ready" "$OUT/logcat.txt")
-    for _ in $(seq 1 90); do [ "$(grep -c "Recommendations ready" "$OUT/logcat.txt")" -gt "$before" ] && break; sleep 2; done
+    wait_ready "$r0"
     grep -E "KultrDL.*Recommendations" "$OUT/logcat.txt" | tail -12
-    if [ "$(grep -c "Recommendations ready" "$OUT/logcat.txt")" -gt "$before" ]; then
+    if [ "$(ready)" -gt "$r0" ]; then
       echo "Recommendations built"
       go_tab "Home"
       sleep 3

@@ -38,6 +38,7 @@ import app.kultr.dl.core.model.Track
 import app.kultr.dl.core.net.Http
 import app.kultr.dl.core.sources.LastFm
 import app.kultr.dl.core.sources.ListenBrainz
+import app.kultr.dl.core.sources.Subsonic
 import app.kultr.dl.core.sources.YouTubeMusic
 import app.kultr.dl.core.taste.Credits
 import app.kultr.dl.core.taste.Signal
@@ -322,11 +323,18 @@ class Recommender(
 
     suspend fun forgetPhone() = library.replaceOwned(Owner.PHONE.name, emptyList())
 
-    /** Reads every song on the user's Navidrome, with play counts, stars and ratings. */
+    /** Reads every song on the user's Navidrome, with the signed-in account's play counts, stars and ratings. */
     suspend fun syncNavidrome(): String = withContext(Dispatchers.IO) {
         val client = navidrome.client(http) ?: throw IllegalStateException("Navidrome isn't set up, or its password needs entering again.")
         try {
             val info = client.ping()
+            val admin = try {
+                client.isAdmin()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
             val songs = client.songs()
             val entities = songs.map { song ->
                 OwnedSongEntity(
@@ -351,8 +359,9 @@ class Recommender(
                 )
             }
             library.replaceOwned(Owner.NAVIDROME.name, entities)
-            val note = "${entities.size} songs from $info"
-            navidrome.update { it.copy(lastSyncAt = System.currentTimeMillis(), lastSync = note, songCount = entities.size) }
+            val played = songs.count { it.playCount > 0 }
+            val note = "${entities.size} songs ($played played by ${client.server.username}) from $info"
+            navidrome.update { it.copy(lastSyncAt = System.currentTimeMillis(), lastSync = note, songCount = entities.size, isAdmin = admin) }
             Log.i(TAG, "Navidrome: synced $note")
             note
         } catch (e: CancellationException) {
@@ -371,12 +380,15 @@ class Recommender(
         val c = navidrome.config.value
         val target = c.destination ?: return
         if (!c.rescan || destinations.none { it.serverId == target.serverId && it.folder == target.folder }) return
-        val client = navidrome.client(http) ?: return
+        val client = navidrome.scanClient(http) ?: return
         val note = try {
             client.startScan()
             "Rescan started after downloads"
         } catch (e: CancellationException) {
             throw e
+        } catch (e: Subsonic.SubsonicException) {
+            if (e.code == 50) "Couldn't start a rescan: only admins can, and ${client.server.username} isn't one. Add an admin login for rescans."
+            else "Couldn't start a rescan: ${describe(e)}"
         } catch (e: Exception) {
             "Couldn't start a rescan: ${describe(e)}"
         }

@@ -70,7 +70,9 @@ playing.
   playlists that update themselves every day.
 - **Navidrome.** Connect your server and its songs play in mixes straight from
   it; “Download to Navidrome” puts downloads into its music folder (over your
-  saved SFTP/FTP server) and asks it to rescan.
+  saved SFTP/FTP server) and asks it to rescan. Sign in with the account you
+  listen with — Navidrome keeps plays, stars and ratings per account — and,
+  if that isn't an admin, add an admin login used only for rescans.
 - **Block artists.** Their songs, and every song they're featured on, are
   hidden everywhere (search, albums, playlists, library, suggestions) and
   skipped if they come up in the queue.

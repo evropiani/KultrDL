@@ -78,9 +78,26 @@ jobs:
           done
           echo "Navidrome has $n songs"
           [ "$n" -ge 5 ] || { docker logs navidrome 2>&1 | tail -30; exit 1; }
-          # Play them a few times, so there is history to learn from.
-          for id in $(songs | python3 -c 'import sys,json; print(" ".join(s["id"] for s in json.load(sys.stdin)["subsonic-response"]["searchResult3"]["song"]))'); do
-            for _ in 1 2 3; do curl -s --max-time 10 "$api/scrobble.view?$auth&id=$id&submission=true" >/dev/null || true; done
+          # A normal account to listen with, as people do: the plays go to it, not to the admin.
+          token=$(curl -s --max-time 10 -H 'Content-Type: application/json' -d '{"username":"admin","password":"kultr-pass"}' \
+            http://127.0.0.1:4533/auth/login | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+          created=$(curl -s --max-time 10 -H 'Content-Type: application/json' -H "x-nd-authorization: Bearer $token" \
+            -d '{"userName":"listener","name":"Listener","password":"listen-pass","isAdmin":false}' http://127.0.0.1:4533/api/user)
+          echo "Created: $created"
+          user_id=$(echo "$created" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)
+          listener="u=listener&p=listen-pass&v=1.16.1&c=ci&f=json"
+          seen() { curl -s --max-time 10 "$api/search3.view?$listener&query=&songCount=50" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["subsonic-response"].get("searchResult3",{}).get("song",[])))' 2>/dev/null || echo 0; }
+          if [ "$(seen)" -lt 5 ] && [ -n "$user_id" ]; then
+            # Navidrome with several libraries gives new users none until they're added.
+            curl -s --max-time 10 -X PUT -H 'Content-Type: application/json' -H "x-nd-authorization: Bearer $token" \
+              -d '{"libraryIds":[1]}' "http://127.0.0.1:4533/api/user/$user_id/library" || true
+            echo
+          fi
+          echo "listener sees $(seen) songs"
+          [ "$(seen)" -ge 5 ]
+          # Play them a few times as listener, so there is history to learn from.
+          for id in $(curl -s --max-time 10 "$api/search3.view?$listener&query=&songCount=50" | python3 -c 'import sys,json; print(" ".join(s["id"] for s in json.load(sys.stdin)["subsonic-response"]["searchResult3"]["song"]))'); do
+            for _ in 1 2 3; do curl -s --max-time 10 "$api/scrobble.view?$listener&id=$id&submission=true" >/dev/null || true; done
           done
 
       - name: Enable KVM

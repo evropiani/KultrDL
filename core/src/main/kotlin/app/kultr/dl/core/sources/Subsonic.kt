@@ -87,6 +87,12 @@ class Subsonic(private val http: Http, val server: Server) {
         call("getArtistInfo2", "id" to artistId, "count" to "$count", "includeNotPresent" to "true")
             .at("artistInfo2").at("similarArtist").list.mapNotNull { it.at("name").str }
 
+    /**
+     * Whether the signed-in account is an admin, or null when the server doesn't say.
+     * Plays, stars and ratings belong to each account; only admins may start scans.
+     */
+    suspend fun isAdmin(): Boolean? = call("getUser", "username" to server.username).at("user").at("adminRole").str?.toBooleanStrictOrNull()
+
     /** Ask the server to look for new files now (only admins may). */
     suspend fun startScan(): Boolean = call("startScan").at("scanStatus").at("scanning").str == "true"
 
