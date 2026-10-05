@@ -96,7 +96,9 @@ class Karousel(
             if (take(pools[first])) continue
             if (pools.none { take(it) }) break
         }
-        while (picked.size < input.count && backups.any { take(it) }) Unit
+        while (picked.size < input.count) {
+            if (backups.none { take(it) }) break
+        }
 
         val sources = listOf(fromStation, found.flatMap { it.similar }, found.flatMap { it.same })
         val counts = sources.map { s -> picked.count { it in s } }

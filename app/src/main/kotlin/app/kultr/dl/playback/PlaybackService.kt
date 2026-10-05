@@ -280,7 +280,7 @@ class PlaybackService : MediaSessionService() {
 
     /** The next two songs, in the order they'll play, made ready to start at once (see [StreamResolver.prefetch]). */
     private fun readyAhead(player: Player) {
-        if (player.mediaItemCount < 2 || player.repeatMode == Player.REPEAT_MODE_ONE) return
+        if (placing || player.mediaItemCount < 2 || player.repeatMode == Player.REPEAT_MODE_ONE) return
         val next = player.nextMediaItemIndex
         if (next == C.INDEX_UNSET) return
         val after = player.currentTimeline.getNextWindowIndex(next, player.repeatMode, player.shuffleModeEnabled)
@@ -293,6 +293,9 @@ class PlaybackService : MediaSessionService() {
     // ------------------------------------------------------------- Karousel --
 
     private var topping: Job? = null
+
+    /** Karousel is adding songs and placing them: what comes next is settled once it's done. */
+    private var placing = false
 
     /** The song Karousel last found nothing for, so it doesn't ask again for the same one. */
     private var nothingFor: String? = null
@@ -353,8 +356,14 @@ class PlaybackService : MediaSessionService() {
             withContext(Dispatchers.IO) { graph.library.remember(more) }
             val start = player.mediaItemCount
             val stopped = player.playbackState == Player.STATE_ENDED
-            player.addMediaItems(more.map { MediaItems.from(it, karousel = true) })
-            if (player.shuffleModeEnabled) playLast(player, start, more.size)
+            placing = true
+            try {
+                player.addMediaItems(more.map { MediaItems.from(it, karousel = true) })
+                if (player.shuffleModeEnabled) playLast(player, start, more.size)
+            } finally {
+                placing = false
+            }
+            readyAhead(player)
             Log.i(TAG, "Karousel: queued ${more.size} songs: ${more.take(3).joinToString { "${it.artist} – ${it.title}" }}…")
             if (stopped) {
                 player.seekTo(start, 0)
