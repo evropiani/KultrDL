@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -94,7 +95,8 @@ fun MiniPlayer(state: PlayerUiState, modifier: Modifier = Modifier) {
                     },
                 )
             }
-            .clickable { actions.openPlayer() },
+            .clickable { actions.openPlayer() }
+            .testTag("mini-player"),
     ) {
         Row(
             Modifier

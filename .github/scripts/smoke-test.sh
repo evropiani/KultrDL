@@ -341,6 +341,29 @@ if [ -n "$played_from" ]; then
   else
     failures+=("couldn't connect Navidrome")
   fi
+
+  echo "== Karousel"
+  # The test song has played out. The shuffle button's third state, Karousel, carries on with music like it;
+  # the catalogue doesn't know the test song, so it falls back on the user's own music: the Navidrome songs.
+  if step "open the player" eval 'go_tab "Home" && tap_attr resource-id mini-player' &&
+    step "turn shuffle on" tap_scrolling tap_attr resource-id shuffle-mode &&
+    sleep 2 &&
+    step "turn Karousel on" tap_attr resource-id shuffle-mode; then
+    sleep 2
+    if dump_ui && grep -q 'content-desc="Karousel on"' "$OUT/ui.xml"; then echo "The shuffle button shows Karousel"; else failures+=("the shuffle button doesn't show Karousel"); fi
+    for _ in $(seq 1 45); do log_has "Karousel: queued|Karousel: found nothing" && break; sleep 2; done
+    grep -E "KultrDL.*Karousel" "$OUT/logcat.txt" | tail -4
+    if log_has "Karousel: queued [1-9]"; then
+      for _ in $(seq 1 30); do log_has "Playing navidrome:" && break; sleep 2; done
+      if log_has "Playing navidrome:"; then echo "Karousel carried on with a Navidrome song"; else failures+=("Karousel's songs didn't play"); fi
+      screenshot karousel
+      if see_scrolling "Karousel"; then echo "The queue shows Karousel's songs"; else warnings+=("no Karousel heading in the queue"); fi
+    else
+      failures+=("Karousel didn't add anything")
+    fi
+  else
+    failures+=("couldn't turn Karousel on")
+  fi
 fi
 screenshot 9-end
 

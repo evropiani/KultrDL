@@ -76,5 +76,5 @@ class AppGraph(val app: Application) {
     val recommender = Recommender(app, library, db.owned(), settings, taste, navidrome, catalog, phone, http, scope).also { r ->
         downloads.afterSent = { r.afterUploads(it) }
     }
-    val player = PlayerConnection(app, library, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
+    val player = PlayerConnection(app, library, settings, CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate))
 }

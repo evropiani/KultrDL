@@ -20,6 +20,11 @@ playing.
   Music, SoundCloud, Bandcamp — or any of the other sites yt-dlp understands.
 - **Play** in the background with a media notification, lock-screen and headset
   controls, a queue, shuffle and repeat. Downloaded tracks play offline.
+- **Karousel.** Tap shuffle twice: when the queue runs out, music like what
+  was playing keeps coming — a station started from the song playing, songs by
+  similar artists and the same ones, and your own music, which also keeps it
+  going offline. Its songs show under their own heading in Up next and leave
+  the queue when you turn it off. Blocked artists never come up.
 - **Library:** favourites (the heart), saved tracks, your own playlists (make
   them, or save any album or playlist from a source as one), downloads and
   listening history. Back it up to a file and restore it.

@@ -40,6 +40,8 @@ data class Settings(
     val wifiOnly: Boolean = false,
     val embedArtwork: Boolean = true,
     val streamQuality: StreamQuality = StreamQuality.HIGH,
+    /** Karousel: when the queue runs out, similar music keeps playing (the shuffle button's third state). */
+    val karousel: Boolean = false,
     val youtubeProfile: YouTubeProfile = YouTubeProfile.DEFAULT,
     val autoUpdateEngine: Boolean = true,
     val lastEngineCheck: Long = 0,

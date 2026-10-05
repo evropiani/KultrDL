@@ -2,6 +2,7 @@ package app.kultr.dl.playback
 
 import android.content.ComponentName
 import android.content.Context
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
@@ -9,6 +10,7 @@ import androidx.media3.session.SessionToken
 import app.kultr.dl.core.model.Source
 import app.kultr.dl.core.model.Track
 import app.kultr.dl.data.Library
+import app.kultr.dl.data.SettingsRepository
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.CoroutineScope
@@ -18,9 +20,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-data class QueueEntry(val index: Int, val track: Track) {
+/** [karousel]: added by Karousel, not by the user. */
+data class QueueEntry(val index: Int, val track: Track, val karousel: Boolean = false) {
     val key: String get() = "$index:${track.id}"
 }
+
+/** The shuffle button's states, in the order a tap moves through them. */
+enum class ShuffleMode { OFF, SHUFFLE, KAROUSEL }
 
 data class PlayerUiState(
     val current: Track? = null,
@@ -33,16 +39,25 @@ data class PlayerUiState(
     val durationMs: Long = 0,
     val shuffle: Boolean = false,
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
+    /** Queue positions after the current one, in the order they will play (shuffled, when shuffle is on). */
+    val order: List<Int> = emptyList(),
+    /** Queue positions Karousel added. */
+    val fromKarousel: Set<Int> = emptySet(),
 ) {
     val upNext: List<QueueEntry>
-        get() = if (index < 0) emptyList() else queue.drop(index + 1).mapIndexed { i, t -> QueueEntry(index + 1 + i, t) }
+        get() = if (index < 0) emptyList() else order.mapNotNull { i -> queue.getOrNull(i)?.let { QueueEntry(i, it, i in fromKarousel) } }
 }
 
 /**
  * The interface's hold on the playback service: a MediaController, and
  * its state as a flow for Compose.
  */
-class PlayerConnection(private val context: Context, private val library: Library, private val scope: CoroutineScope) {
+class PlayerConnection(
+    private val context: Context,
+    private val library: Library,
+    private val settings: SettingsRepository,
+    private val scope: CoroutineScope,
+) {
     private var future: ListenableFuture<MediaController>? = null
     private var controller: MediaController? = null
     private val pending = mutableListOf<(MediaController) -> Unit>()
@@ -99,9 +114,24 @@ class PlayerConnection(private val context: Context, private val library: Librar
         )
     }
 
+    /** The positions after [index] in play order, following the shuffle order when shuffle is on. */
+    private fun playOrder(c: MediaController, index: Int, count: Int): List<Int> {
+        if (index < 0) return emptyList()
+        val t = c.currentTimeline
+        if (t.windowCount != count) return (index + 1 until count).toList()
+        val out = ArrayList<Int>()
+        var i = t.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
+        while (i != C.INDEX_UNSET && out.size < count) {
+            out += i
+            i = t.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
+        }
+        return out
+    }
+
     private fun refresh() {
         val c = controller ?: return
-        val queue = (0 until c.mediaItemCount).map { trackOf(c.getMediaItemAt(it)) }
+        val items = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
+        val queue = items.map(::trackOf)
         val index = c.currentMediaItemIndex.takeIf { queue.isNotEmpty() } ?: -1
         val current = queue.getOrNull(index)
         state.value = PlayerUiState(
@@ -115,6 +145,8 @@ class PlayerConnection(private val context: Context, private val library: Librar
             durationMs = c.duration.takeIf { it > 0 } ?: current?.durationMs ?: 0,
             shuffle = c.shuffleModeEnabled,
             repeatMode = c.repeatMode,
+            order = playOrder(c, index, queue.size),
+            fromKarousel = items.indices.filter { MediaItems.isKarousel(items[it]) }.toSet(),
         )
     }
 
@@ -194,12 +226,50 @@ class PlayerConnection(private val context: Context, private val library: Librar
 
     fun move(from: Int, to: Int) = withController { it.moveMediaItem(from, to) }
 
+    /** Removes what plays after the current song (in shuffled order too), a run of neighbours at a time. */
     fun clearUpcoming() = withController { c ->
-        val start = c.currentMediaItemIndex + 1
-        if (start < c.mediaItemCount) c.removeMediaItems(start, c.mediaItemCount)
+        val upcoming = playOrder(c, c.currentMediaItemIndex, c.mediaItemCount).sortedDescending()
+        var i = 0
+        while (i < upcoming.size) {
+            var from = upcoming[i]
+            val to = from + 1
+            while (i + 1 < upcoming.size && upcoming[i + 1] == from - 1) from = upcoming[++i]
+            c.removeMediaItems(from, to)
+            i++
+        }
     }
 
     fun setShuffle(on: Boolean) = withController { it.shuffleModeEnabled = on }
+
+    fun shuffleMode(state: PlayerUiState = this.state.value, karousel: Boolean = settings.settings.value.karousel): ShuffleMode = when {
+        karousel -> ShuffleMode.KAROUSEL
+        state.shuffle -> ShuffleMode.SHUFFLE
+        else -> ShuffleMode.OFF
+    }
+
+    /**
+     * The shuffle button: off → shuffle → Karousel → off. Karousel keeps shuffle
+     * as it was and turns repeat off, since a repeating queue never runs out.
+     */
+    fun cycleShuffle(): ShuffleMode {
+        val next = when (shuffleMode()) {
+            ShuffleMode.OFF -> ShuffleMode.SHUFFLE
+            ShuffleMode.SHUFFLE -> ShuffleMode.KAROUSEL
+            ShuffleMode.KAROUSEL -> ShuffleMode.OFF
+        }
+        when (next) {
+            ShuffleMode.SHUFFLE -> setShuffle(true)
+            ShuffleMode.KAROUSEL -> {
+                withController { if (it.repeatMode != Player.REPEAT_MODE_OFF) it.repeatMode = Player.REPEAT_MODE_OFF }
+                settings.update { it.copy(karousel = true) }
+            }
+            ShuffleMode.OFF -> {
+                settings.update { it.copy(karousel = false) }
+                setShuffle(false)
+            }
+        }
+        return next
+    }
 
     fun cycleRepeat() = withController { c ->
         c.repeatMode = when (c.repeatMode) {

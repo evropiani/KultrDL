@@ -10,12 +10,14 @@ import app.kultr.dl.core.model.Track
 object MediaItems {
     const val SCHEME = "kultrdl"
     private const val EXTRA_SOURCE = "kultrdl.source"
+    private const val EXTRA_KAROUSEL = "kultrdl.karousel"
 
     fun uriFor(trackId: String): Uri = Uri.parse("$SCHEME://track/" + Uri.encode(trackId))
 
     fun trackId(uri: Uri): String? = if (uri.scheme == SCHEME) uri.lastPathSegment else null
 
-    fun from(track: Track): MediaItem = MediaItem.Builder()
+    /** [karousel]: added by Karousel, not by the user. */
+    fun from(track: Track, karousel: Boolean = false): MediaItem = MediaItem.Builder()
         .setMediaId(track.id)
         .setUri(uriFor(track.id))
         .setMediaMetadata(
@@ -29,10 +31,17 @@ object MediaItems {
                 .setIsPlayable(true)
                 .setIsBrowsable(false)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .setExtras(Bundle().apply { putString(EXTRA_SOURCE, track.source.name) })
+                .setExtras(
+                    Bundle().apply {
+                        putString(EXTRA_SOURCE, track.source.name)
+                        if (karousel) putBoolean(EXTRA_KAROUSEL, true)
+                    },
+                )
                 .build(),
         )
         .build()
+
+    fun isKarousel(item: MediaItem): Boolean = item.mediaMetadata.extras?.getBoolean(EXTRA_KAROUSEL) == true
 
     /** A controller's item arrives without its URI; give it back. */
     fun restore(item: MediaItem): MediaItem = item.buildUpon().setUri(uriFor(item.mediaId)).build()

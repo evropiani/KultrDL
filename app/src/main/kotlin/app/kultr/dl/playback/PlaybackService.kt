@@ -16,11 +16,13 @@ import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import app.kultr.dl.KultrDLApp
 import app.kultr.dl.MainActivity
+import app.kultr.dl.core.discover.Keys
 import app.kultr.dl.data.db.PlayEntity
 import app.kultr.dl.data.describe
 import app.kultr.dl.engine.HlsConcatDataSource
@@ -30,17 +32,25 @@ import app.kultr.dl.engine.YouTubeProfile
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import java.io.IOException
+import kotlin.random.Random
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * Background playback with a media notification, lock-screen and headset
  * controls. Queue entries are resolved as the player reaches them: a
  * downloaded file if there is one, otherwise the stream yt-dlp finds.
+ * With Karousel on, similar music is added as the queue runs out.
  */
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaSessionService() {
@@ -83,6 +93,13 @@ class PlaybackService : MediaSessionService() {
                     Futures.immediateFuture(mediaItems.map(MediaItems::restore).toMutableList())
             })
             .build()
+
+        // Karousel on: top the queue up now if it is about to end. Off: take its songs out again.
+        scope.launch {
+            graph.settings.settings.map { it.karousel }.distinctUntilChanged().drop(1).collect { on ->
+                if (on) topUp(player) else dropKarousel(player)
+            }
+        }
     }
 
     private fun resolve(spec: DataSpec, resolver: StreamResolver): DataSpec {
@@ -161,7 +178,14 @@ class PlaybackService : MediaSessionService() {
             // Have the next track's stream ready before it is needed.
             val next = player.nextMediaItemIndex
             if (next != C.INDEX_UNSET) graph.resolver.prefetch(player.getMediaItemAt(next).mediaId)
+            topUp(player)
         }
+
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) topUp(player)
+        }
+
+        override fun onRepeatModeChanged(repeatMode: Int) = topUp(player)
 
         override fun onPlayerError(error: PlaybackException) {
             Log.w(TAG, "Playback error", error)
@@ -199,7 +223,10 @@ class PlaybackService : MediaSessionService() {
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_READY) player.duration.takeIf { it > 0 }?.let { listen?.durationMs = it }
-            if (playbackState == Player.STATE_ENDED) endListen(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+            if (playbackState == Player.STATE_ENDED) {
+                endListen(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
+                topUp(player)
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -220,6 +247,109 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------- Karousel --
+
+    private var topping: Job? = null
+
+    /** The song Karousel last found nothing for, so it doesn't ask again for the same one. */
+    private var nothingFor: String? = null
+
+    private fun karouselOn() = KultrDLApp.graph.settings.settings.value.karousel
+
+    /** Queue positions in the order they play from the current one: after it ([forward]) or before it, nearest first. */
+    private fun around(player: Player, forward: Boolean): List<Int> {
+        val t = player.currentTimeline
+        if (t.isEmpty || player.currentMediaItemIndex == C.INDEX_UNSET) return emptyList()
+        val out = ArrayList<Int>()
+        fun step(i: Int) = if (forward) t.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+        else t.getPreviousWindowIndex(i, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+        var i = step(player.currentMediaItemIndex)
+        while (i != C.INDEX_UNSET && out.size < t.windowCount) {
+            out += i
+            i = step(i)
+        }
+        return out
+    }
+
+    /**
+     * With Karousel on, when the song playing is the last or next to last (or the
+     * queue has ended), adds music like what has been playing, and carries on
+     * playing if it had stopped. Repeat keeps the queue going by itself, so
+     * Karousel waits while it's on.
+     */
+    private fun topUp(player: ExoPlayer) {
+        if (!karouselOn() || player.repeatMode != Player.REPEAT_MODE_OFF || player.mediaItemCount == 0) return
+        if (topping?.isActive == true) return
+        val ended = player.playbackState == Player.STATE_ENDED
+        if (!ended && around(player, forward = true).size > 1) return
+        val current = player.currentMediaItem ?: return
+        if (nothingFor == current.mediaId) return
+        val graph = KultrDLApp.graph
+        val items = (0 until player.mediaItemCount).map(player::getMediaItemAt)
+        // The song playing and the ones before it, and a couple the user queued themselves, to stay close to where the music started.
+        val recent = listOf(current.mediaId) + around(player, forward = false).take(4).map { player.getMediaItemAt(it).mediaId }
+        val chosen = items.filterNot(MediaItems::isKarousel).map { it.mediaId }.shuffled().take(2)
+        val queued = items.map { Keys.track(it.mediaMetadata.artist?.toString().orEmpty(), it.mediaMetadata.title?.toString().orEmpty()) }.toSet()
+        topping = scope.launch {
+            val more = try {
+                val seeds = (recent + chosen).distinct().mapNotNull { graph.library.track(it) }
+                graph.recommender.karousel(seeds, queued)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Karousel: ${describe(e)}", e)
+                emptyList()
+            }
+            if (!karouselOn() || player.mediaItemCount == 0) return@launch
+            if (more.isEmpty()) {
+                nothingFor = current.mediaId
+                Log.i(TAG, "Karousel: found nothing to add")
+                return@launch
+            }
+            nothingFor = null
+            withContext(Dispatchers.IO) { graph.library.remember(more) }
+            val start = player.mediaItemCount
+            val stopped = player.playbackState == Player.STATE_ENDED
+            player.addMediaItems(more.map { MediaItems.from(it, karousel = true) })
+            if (player.shuffleModeEnabled) playLast(player, start, more.size)
+            Log.i(TAG, "Karousel: queued ${more.size} songs: ${more.take(3).joinToString { "${it.artist} – ${it.title}" }}…")
+            if (stopped) {
+                player.seekTo(start, 0)
+                player.prepare()
+                player.play()
+            } else {
+                val next = player.nextMediaItemIndex
+                if (next != C.INDEX_UNSET) graph.resolver.prefetch(player.getMediaItemAt(next).mediaId)
+            }
+        }
+    }
+
+    /**
+     * Shuffled play gives added songs random places in the order, some among the
+     * songs already played; Karousel's songs go after everything else instead.
+     */
+    private fun playLast(player: ExoPlayer, start: Int, count: Int) {
+        val t = player.currentTimeline
+        val order = ArrayList<Int>(t.windowCount)
+        var i = t.getFirstWindowIndex(true)
+        while (i != C.INDEX_UNSET && order.size < t.windowCount) {
+            if (i < start) order += i
+            i = t.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, true)
+        }
+        order += start until start + count
+        if (order.size == player.mediaItemCount) player.setShuffleOrder(DefaultShuffleOrder(order.toIntArray(), Random.nextLong()))
+    }
+
+    /** Karousel off: its songs that haven't played yet leave the queue. */
+    private fun dropKarousel(player: ExoPlayer) {
+        topping?.cancel()
+        nothingFor = null
+        val upcoming = around(player, forward = true).toSet()
+        (player.mediaItemCount - 1 downTo 0)
+            .filter { it in upcoming && MediaItems.isKarousel(player.getMediaItemAt(it)) }
+            .forEach(player::removeMediaItem)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session

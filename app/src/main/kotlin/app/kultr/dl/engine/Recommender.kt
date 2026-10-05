@@ -27,6 +27,8 @@ import app.kultr.dl.core.discover.ArtistRef
 import app.kultr.dl.core.discover.CatalogDirectory
 import app.kultr.dl.core.discover.Discovery
 import app.kultr.dl.core.discover.Feed
+import app.kultr.dl.core.discover.Karousel
+import app.kultr.dl.core.discover.Keys
 import app.kultr.dl.core.discover.Mix
 import app.kultr.dl.core.discover.Owned
 import app.kultr.dl.core.discover.Pick
@@ -293,6 +295,34 @@ class Recommender(
             ?: library.entity(track.id)?.matchedUrl
         val id = YouTubeMusic.videoId(url) ?: return emptyList()
         return catalog.youTubeMusic.radio(id).take(25)
+    }
+
+    /**
+     * Karousel's next songs: music like [seeds] (what has been playing, the song now
+     * playing first), leaving out [exclude] ([Keys.track] keys of the queue) and
+     * whatever played in the last few hours.
+     */
+    suspend fun karousel(seeds: List<Track>, exclude: Set<String>, count: Int = 10): List<Track> = withContext(Dispatchers.IO) {
+        val s = settings.settings.value
+        val now = System.currentTimeMillis()
+        val recent = library.playsSince(now - 3 * HOUR).map { Keys.track(it.artist, it.title) }
+        val nav = navidrome.config.value
+        val songs = owned.all().filter { if (it.owner == Owner.PHONE.name) s.usePhoneMusic && phone.hasPermission() else nav.configured }
+        val known = library.known().filter { it.favorite || it.saved || it.localUri != null || it.playCount > 0 }
+        // The user's own music, most played first: Karousel's fallback, and what it mixes in.
+        val mine = (
+            songs.map { it.toTrack() to it.playCount + (if (it.starred) 3 else 0) } +
+                known.map { it.toTrack() to it.playCount + (if (it.favorite) 3 else 0) }
+            )
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .distinctBy { Keys.track(it.artist, it.title) }
+        Karousel(
+            directory = CatalogDirectory(catalog.deezer, catalog.apple) { settings.settings.value.useDeezer },
+            radio = if (s.useYouTubeRadio) ::radio else null,
+            cache = artistCache,
+            log = { Log.i(TAG, "Karousel: $it") },
+        ).next(Karousel.Input(seeds, exclude + recent, rules(s), mine, count))
     }
 
     /** ListenBrainz's newest weekly playlists for the user, one of each kind. */
