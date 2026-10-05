@@ -1,6 +1,7 @@
 package app.kultr.dl.engine
 
 import android.net.Uri
+import android.util.Log
 import app.kultr.dl.core.Catalog
 import app.kultr.dl.core.model.Source
 import app.kultr.dl.core.sources.Subsonic
@@ -12,14 +13,22 @@ import app.kultr.dl.core.util.str
 import app.kultr.dl.data.Library
 import app.kultr.dl.data.SettingsRepository
 import app.kultr.dl.data.StreamQuality
+import app.kultr.dl.data.describe
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import okhttp3.Headers.Companion.toHeaders
+import okhttp3.OkHttpClient
+import okhttp3.Request
 
 /**
  * Turns a track into something the player can open: its downloaded file
@@ -35,16 +44,20 @@ class StreamResolver(
     private val scope: CoroutineScope,
     /** The user's Navidrome server, for its songs. */
     private val navidrome: () -> Subsonic? = { null },
+    /** The player's HTTP client: getting a stream ready opens the connection it will then reuse. */
+    private val http: OkHttpClient? = null,
 ) {
     sealed interface Resolved {
         data class Local(val uri: Uri) : Resolved
         data class Remote(val url: String, val headers: Map<String, String>, val hls: Boolean) : Resolved
     }
 
-    private data class Cached(val value: Resolved.Remote, val expiresAt: Long)
+    /** [checked]: its first bytes came back, so it will start at once. */
+    private data class Cached(val value: Resolved.Remote, val expiresAt: Long, val checked: Boolean = false)
 
     private val cache = ConcurrentHashMap<String, Cached>()
     private val inFlight = ConcurrentHashMap<String, Deferred<Resolved>>()
+    private val preparing: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     /** YouTube profiles already refused for a track, and the one it is on now. */
     private val tried = ConcurrentHashMap<String, MutableSet<YouTubeProfile>>()
@@ -80,10 +93,59 @@ class StreamResolver(
         cache.remove(trackId)
     }
 
-    /** Start resolving in the background, so the next track starts at once. */
+    /**
+     * Gets a song that's coming up ready in the background, so it starts the
+     * moment the one before it ends: its stream found and, for a stream from
+     * YouTube, its first bytes fetched. That also opens the connection the
+     * player then reuses, and a refusal is answered with another YouTube
+     * client now, not with a pause when the song is due.
+     */
     fun prefetch(trackId: String) {
-        if (cache[trackId]?.let { it.expiresAt > System.currentTimeMillis() } == true) return
-        scope.async { runCatching { resolve(trackId) } }
+        if (cache[trackId]?.let { it.checked && it.expiresAt > System.currentTimeMillis() } == true) return
+        if (!preparing.add(trackId)) return
+        scope.launch {
+            try {
+                Log.i(TAG, "Ready ahead: $trackId (${ready(trackId)})")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't get $trackId ready ahead: ${describe(e)}")
+            } finally {
+                preparing.remove(trackId)
+            }
+        }
+    }
+
+    /** Resolves [trackId] and checks its stream; says how it will play. */
+    private suspend fun ready(trackId: String): String {
+        repeat(YouTubeProfile.entries.size) {
+            val remote = when (val resolved = resolve(trackId)) {
+                is Resolved.Local -> return "on this phone"
+                is Resolved.Remote -> resolved
+            }
+            val youTube = current[trackId] != null
+            if (remote.hls || http == null || own(trackId) != null) return "stream found"
+            val code = withContext(Dispatchers.IO) { firstBytes(http, remote) }
+            when {
+                code in 200..299 -> {
+                    cache.computeIfPresent(trackId) { _, c -> if (c.value == remote) c.copy(checked = true) else c }
+                    return "stream checked"
+                }
+                code == 403 && youTube && tryNextProfile(trackId) ->
+                    Log.i(TAG, "YouTube refused the stream of $trackId ahead of time; trying another client")
+                else -> throw IOException("its stream answered HTTP $code")
+            }
+        }
+        throw IOException("YouTube refused every client")
+    }
+
+    /** The answer to a request for the stream's first kilobyte (read, so the connection stays open for the player). */
+    private fun firstBytes(client: OkHttpClient, remote: Resolved.Remote): Int {
+        val request = Request.Builder().url(remote.url).headers(remote.headers.toHeaders()).header("Range", "bytes=0-1023").build()
+        return client.newCall(request).execute().use { response ->
+            response.body.bytes()
+            response.code
+        }
     }
 
     suspend fun resolve(trackId: String): Resolved {
@@ -170,6 +232,8 @@ class StreamResolver(
     }
 
     companion object {
+        private const val TAG = "KultrDL"
+
         fun pickStream(json: JsonElement): Resolved.Remote? {
             val chosen: JsonElement = json.at("requested_formats").list
                 .firstOrNull { it.at("vcodec").str == "none" || it.at("acodec").str.let { a -> a != null && a != "none" } }

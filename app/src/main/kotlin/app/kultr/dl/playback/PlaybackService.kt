@@ -14,6 +14,7 @@ import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.ShuffleOrder.DefaultShuffleOrder
@@ -73,6 +74,15 @@ class PlaybackService : MediaSessionService() {
             )
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
+            // Buffer well ahead: once a song is loaded, the next one starts loading up to two and a half
+            // minutes before it's due, so songs follow each other without a pause.
+            .setLoadControl(
+                DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(90_000, 150_000, 1_000, 2_500)
+                    .setTargetBufferBytes(32 * 1024 * 1024)
+                    .setPrioritizeTimeOverSizeThresholds(true)
+                    .build(),
+            )
             .build()
         player.addListener(Listener(player))
 
@@ -160,9 +170,17 @@ class PlaybackService : MediaSessionService() {
     }
 
     private inner class Listener(private val player: ExoPlayer) : Player.Listener {
+        /** When the player last moved on to the next song by itself, while it is still loading. */
+        private var movedOnAt = 0L
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             val graph = KultrDLApp.graph
             endListen(reason)
+            movedOnAt = 0
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && mediaItem != null) {
+                if (player.playbackState == Player.STATE_READY) Log.i(TAG, "Moved on to ${mediaItem.mediaId} without a pause")
+                else movedOnAt = System.currentTimeMillis()
+            }
             val meta = mediaItem?.mediaMetadata
             // Songs by blocked artists (or with them on) are passed over, wherever they came from.
             if (mediaItem != null && graph.taste.blocks.value.blocks(meta?.artist?.toString().orEmpty(), meta?.title?.toString().orEmpty())) {
@@ -175,17 +193,24 @@ class PlaybackService : MediaSessionService() {
                     .apply { if (player.isPlaying) playingSince = System.currentTimeMillis() }
             }
             mediaItem?.mediaId?.let { id -> scope.launch { runCatching { graph.library.markPlayed(id) } } }
-            // Have the next track's stream ready before it is needed.
-            val next = player.nextMediaItemIndex
-            if (next != C.INDEX_UNSET) graph.resolver.prefetch(player.getMediaItemAt(next).mediaId)
+            readyAhead(player)
             topUp(player)
         }
 
+        // Whatever changes what comes next (songs added, moved or removed, shuffle, repeat) gets it ready again.
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
-            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) topUp(player)
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
+                readyAhead(player)
+                topUp(player)
+            }
         }
 
-        override fun onRepeatModeChanged(repeatMode: Int) = topUp(player)
+        override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = readyAhead(player)
+
+        override fun onRepeatModeChanged(repeatMode: Int) {
+            readyAhead(player)
+            topUp(player)
+        }
 
         override fun onPlayerError(error: PlaybackException) {
             Log.w(TAG, "Playback error", error)
@@ -222,6 +247,10 @@ class PlaybackService : MediaSessionService() {
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_READY && movedOnAt > 0) {
+                Log.i(TAG, "Moved on to ${player.currentMediaItem?.mediaId} after ${System.currentTimeMillis() - movedOnAt} ms loading")
+                movedOnAt = 0
+            }
             if (playbackState == Player.STATE_READY) player.duration.takeIf { it > 0 }?.let { listen?.durationMs = it }
             if (playbackState == Player.STATE_ENDED) {
                 endListen(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
@@ -247,6 +276,18 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         }
+    }
+
+    /** The next two songs, in the order they'll play, made ready to start at once (see [StreamResolver.prefetch]). */
+    private fun readyAhead(player: Player) {
+        if (player.mediaItemCount < 2 || player.repeatMode == Player.REPEAT_MODE_ONE) return
+        val next = player.nextMediaItemIndex
+        if (next == C.INDEX_UNSET) return
+        val after = player.currentTimeline.getNextWindowIndex(next, player.repeatMode, player.shuffleModeEnabled)
+        listOf(next, after)
+            .filter { it != C.INDEX_UNSET && it != player.currentMediaItemIndex }
+            .distinct()
+            .forEach { KultrDLApp.graph.resolver.prefetch(player.getMediaItemAt(it).mediaId) }
     }
 
     // ------------------------------------------------------------- Karousel --
@@ -319,9 +360,6 @@ class PlaybackService : MediaSessionService() {
                 player.seekTo(start, 0)
                 player.prepare()
                 player.play()
-            } else {
-                val next = player.nextMediaItemIndex
-                if (next != C.INDEX_UNSET) graph.resolver.prefetch(player.getMediaItemAt(next).mediaId)
             }
         }
     }

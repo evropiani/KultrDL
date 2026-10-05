@@ -356,6 +356,18 @@ if [ -n "$played_from" ]; then
     if log_has "Karousel: queued [1-9]"; then
       for _ in $(seq 1 30); do log_has "Playing navidrome:" && break; sleep 2; done
       if log_has "Playing navidrome:"; then echo "Karousel carried on with a Navidrome song"; else failures+=("Karousel's songs didn't play"); fi
+      # The next song is got ready while this one plays, and follows on without a pause (the songs are 35 seconds long).
+      for _ in $(seq 1 20); do log_has "Ready ahead: navidrome:" && break; sleep 2; done
+      if log_has "Ready ahead: navidrome:"; then echo "The next song was ready ahead"; else failures+=("the next song wasn't got ready ahead"); fi
+      for _ in $(seq 1 35); do log_has "Moved on to navidrome:" && break; sleep 2; done
+      grep -E "KultrDL.*(Ready ahead|Moved on to)" "$OUT/logcat.txt" | tail -4
+      if log_has "Moved on to navidrome:.* without a pause"; then
+        echo "The next song followed without a pause"
+      elif log_has "Moved on to navidrome:"; then
+        warnings+=("the next song needed loading: $(grep -o "Moved on to navidrome:.*" "$OUT/logcat.txt" | head -1)")
+      else
+        failures+=("the next song didn't follow on")
+      fi
       screenshot karousel
       if see_scrolling "Karousel"; then echo "The queue shows Karousel's songs"; else warnings+=("no Karousel heading in the queue"); fi
     else

@@ -68,7 +68,7 @@ class AppGraph(val app: Application) {
         },
     )
 
-    val resolver = StreamResolver(library, catalog, ytDlp, settings, scope) { navidrome.client(http) }
+    val resolver = StreamResolver(library, catalog, ytDlp, settings, scope, navidrome = { navidrome.client(http) }, http = okHttp)
     val saver = MediaSaver(app)
     val youtubeCheck = YouTubeCheck(ytDlp, okHttp, settings)
     val downloads = Downloads(app, db.downloads(), library, settings, servers, resolver, ytDlp, saver, okHttp, scope)
